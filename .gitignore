@@ -1,0 +1,23 @@
+# --- بايثون ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# --- مخرجات البناء ---
+build/
+dist/
+installer_output/
+Universal_Media_Player_Portable/
+
+# --- VLC ---
+# حوالي 137 ميجا؛ بتتنزل بـ download_vlc.ps1 قبل البناء
+resources/vlc/
+
+# --- أدوات ومحررات ---
+.claude/
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
