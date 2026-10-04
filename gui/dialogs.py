@@ -542,6 +542,12 @@ class OptionsDialog(wx.Dialog):
             "announce_sleep_timer_checkbox", "options_announce_sleep_timer_label", "announce_sleep_timer"
         )
         _add_announce_checkbox(
+            "announce_equalizer_checkbox", "options_announce_equalizer_label", "announce_equalizer", shortcut="Q / Shift+Q"
+        )
+        _add_announce_checkbox(
+            "announce_stream_title_checkbox", "options_announce_stream_title_label", "announce_stream_title", shortcut="N"
+        )
+        _add_announce_checkbox(
             "announce_import_export_checkbox",
             "options_announce_import_export_label",
             "announce_settings_import_export",

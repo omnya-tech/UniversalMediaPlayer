@@ -4,30 +4,30 @@
 صغير حقيقي (مش mock)، عشان نتأكد إن فتح/تشغيل/إيقاف مؤقت/قفز/إيقاف
 كامل بتشتغل فعليًا مع VLC، مش بس نظريًا.
 
-ملحوظة: المحرك بقى مبني على مكتبة VLC (python-vlc + برنامج VLC نفسه
-مثبّت على الجهاز) بدل PyAV القديم - شوفي core/engine.py للتفاصيل.
-الاختبارات دي بتحتاج:
-1. ffmpeg متاح على الجهاز عشان تولّد ملف اختبار صغير.
-2. برنامج VLC (أو على الأقل مكتبة libvlc) مثبّت على الجهاز عشان
-   المحرك يقدر يشتغل فعليًا.
-لو أي منهم مش متاح، الاختبارات بتتخطى (skip) تلقائيًا بدل ما تفشل.
+ملحوظة: المحرك بقى مبني على مكتبة VLC (python-vlc) بدل PyAV القديم -
+شوفي core/engine.py للتفاصيل.
+الاختبارات دي بتحتاج مكتبة libvlc (المُضمَّنة في resources/vlc/ أو
+المثبّتة على الجهاز). ملف الاختبار بيتولّد بـ PyAV (من مكتبات المشروع
+أصلًا) بدل ffmpeg خارجي. لو أي منهم مش متاح، الاختبارات بتتخطى (skip)
+تلقائيًا بدل ما تفشل.
 """
 
-import shutil
-import subprocess
 import time
 
 import pytest
 
-from core.engine import PlayerEngine, PlaybackState, _HAS_VLC
-
-FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None
+from core.engine import PlayerEngine, PlaybackState, _load_vlc
+from tests.media_samples import write_sample_media
 
 
 def _vlc_actually_works() -> bool:
     """python-vlc ممكن يكون متثبت (import بينجح) من غير ما مكتبة libvlc
-    الفعلية تكون موجودة على الجهاز - بنتأكد بمحاولة إنشاء Instance فعلي."""
-    if not _HAS_VLC:
+    الفعلية تكون موجودة على الجهاز - بنتأكد بمحاولة إنشاء Instance فعلي.
+
+    _load_vlc نفسها اللي المحرك بيستخدمها، عشان تجهّز مسار النسخة
+    المُضمَّنة قبل الـ import (مش _HAS_VLC مباشرة: قيمتها None لحد أول
+    تحميل، فكانت بتخلّي الاختبارات تتخطى دايمًا)."""
+    if not _load_vlc():
         return False
     try:
         import vlc
@@ -43,23 +43,18 @@ requires_vlc = pytest.mark.skipif(not VLC_AVAILABLE, reason="مكتبة VLC غي
 
 @pytest.fixture(scope="module")
 def sample_media_file(tmp_path_factory):
-    if not FFMPEG_AVAILABLE:
-        pytest.skip("ffmpeg غير متاح في هذه البيئة")
-
-    out_dir = tmp_path_factory.mktemp("media")
-    out_path = str(out_dir / "sample.mp4")
-    subprocess.run(
-        [
-            "ffmpeg", "-y",
-            "-f", "lavfi", "-i", "testsrc=duration=2:size=160x120:rate=10",
-            "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
-            "-c:v", "libx264", "-c:a", "aac", "-shortest", out_path,
-        ],
-        check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    out_path = str(tmp_path_factory.mktemp("media") / "sample.mp4")
+    write_sample_media(out_path)
     return out_path
+
+
+def _wait_until(condition, timeout=3.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if condition():
+            return True
+        time.sleep(0.05)
+    return condition()
 
 
 def _make_engine():
@@ -124,16 +119,20 @@ def test_pause_preserves_position_and_resume_continues(sample_media_file):
 
 @requires_vlc
 def test_seek_while_playing_takes_effect(sample_media_file):
+    """القفز لازم يوصّل التشغيل لنقطة القفز فعلًا.
+
+    بننتظر بالاستطلاع بدل sleep ثابت: VLC بيحدّث get_time على فترات
+    (~250 م.ث) وبيعمل تخزين مؤقت بعد القفز، فوقت ثابت كان بيقيس توقيت
+    VLC مش صحة القفز."""
     engine, events = _make_engine()
     engine.open(sample_media_file)
     engine.play()
-    time.sleep(0.5)
+    assert _wait_until(lambda: engine.get_current_position() > 0.0)
 
-    engine.seek(0.1)
-    time.sleep(0.3)
-    # المفروض الموضع يبقى قريب من نقطة القفز + وقت الانتظار البسيط،
-    # مش مكان عشوائي بعيد عنها
-    assert engine.get_current_position() == pytest.approx(0.4, abs=0.3)
+    target = 1.5
+    engine.seek(target)
+    assert _wait_until(lambda: engine.get_current_position() >= target - 0.3)
+    assert engine.get_current_position() == pytest.approx(target, abs=0.6)
     engine.stop()
 
 
@@ -166,9 +165,11 @@ def test_stop_is_responsive(sample_media_file):
 
 
 def test_engine_degrades_gracefully_without_vlc():
-    """حتى لو VLC مش متاحة خالص على الجهاز، المحرك المفروض يتعامل مع
-    كل نداءاته من غير ما يتعطل (Exception) - يبلّغ خطأ واحد بس عبر
-    on_error ويفضل شغال بأمان (حالة "متوقف" ثابتة)."""
+    """من غير ملف مفتوح (ومن غير VLC أصلًا)، كل نداءات المحرك المفروض
+    تكون آمنة تمامًا من غير ما يتعطل (Exception).
+
+    تهيئة VLC مؤجّلة لحد أول open (شوف _ensure_player)، فالنداءات دي
+    ما بتلمسش VLC ولا بتبلّغ أخطاء - بتتجاهل بهدوء."""
     events = {"errors": []}
     engine = PlayerEngine(on_error=lambda m: events["errors"].append(m))
     # كل النداءات دي المفروض تكون آمنة تمامًا بغض النظر عن توفر VLC
@@ -182,5 +183,64 @@ def test_engine_degrades_gracefully_without_vlc():
     engine.toggle_play_pause()
     assert engine.duration == 0.0 or isinstance(engine.duration, float)
     assert engine.get_current_position() == 0.0
-    if not VLC_AVAILABLE:
-        assert len(events["errors"]) >= 1
+    assert events["errors"] == []
+
+
+@requires_vlc
+def test_equalizer_preset_values_come_from_libvlc():
+    values = PlayerEngine.get_equalizer_preset_values(0)  # flat
+    assert values is not None
+    preamp, bands = values
+    assert len(bands) == 10
+    assert all(abs(b) < 0.01 for b in bands)
+
+
+@requires_vlc
+def test_equalizer_can_change_while_playing_and_survives_new_file(sample_media_file):
+    engine, events = _make_engine()
+    engine.set_equalizer(6.0, [3.0] * 10)  # قبل وجود المشغّل: بيتحفظ
+    engine.open(sample_media_file)
+    engine.play()
+    assert _wait_until(lambda: engine.state == PlaybackState.PLAYING)
+    engine.set_equalizer(None)
+    engine.set_equalizer(-3.0, [0.0] * 5)  # قائمة ناقصة ما توقعش حاجة
+    engine.open(sample_media_file)
+    assert events["errors"] == []
+    engine.stop()
+
+
+@pytest.fixture
+def http_url_for(tmp_path):
+    """سيرفر HTTP محلي صغير بيقدّم ملف - بديل حقيقي لرابط بث."""
+    import functools
+    import http.server
+    import shutil as _shutil
+    import threading
+
+    servers = []
+
+    def serve(path):
+        _shutil.copy(path, tmp_path / "s.mp4")
+        handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(tmp_path))
+        handler.log_message = lambda *a, **k: None
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        servers.append(server)
+        return f"http://127.0.0.1:{server.server_address[1]}/s.mp4"
+
+    yield serve
+    for server in servers:
+        server.shutdown()
+
+
+@requires_vlc
+def test_open_and_play_http_url(sample_media_file, http_url_for):
+    engine, events = _make_engine()
+    url = http_url_for(sample_media_file)
+    assert engine.open(url) is True
+    assert engine.is_stream
+    engine.play()
+    assert _wait_until(lambda: engine.get_current_position() > 0.0)
+    assert engine.has_video
+    assert events["errors"] == []
+    engine.stop()

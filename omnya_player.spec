@@ -20,6 +20,14 @@ from PyInstaller.utils.win32.versioninfo import (
     StringTable, StringStruct, VarFileInfo, VarStruct
 )
 
+# رقم الإصدار مصدره الوحيد core/version.py - البرنامج بيعرضه للمستخدم من
+# هناك، فبيانات الـ exe لازم تطابقه بدل ما يتنسوا في التحديث
+_version_ns = {}
+with open(_os.path.join(SPECPATH, 'core', 'version.py'), encoding='utf-8') as _vf:
+    exec(_vf.read(), _version_ns)
+_app_version = _version_ns['APP_VERSION']
+_app_version_tuple = tuple(int(_p) for _p in _app_version.split('.')) + (0,)
+
 _vlc_resources_dir = _os.path.join('resources', 'vlc')
 _vlc_required_files = ['libvlc.dll', 'libvlccore.dll']
 
@@ -75,8 +83,8 @@ _upx_exclude = [
 # -------------------------------------------------------------------------
 version_info = VSVersionInfo(
     ffi=FixedFileInfo(
-        filevers=(1, 4, 0, 0),
-        prodvers=(1, 4, 0, 0),
+        filevers=_app_version_tuple,
+        prodvers=_app_version_tuple,
         mask=0x3f,
         flags=0x0,
         OS=0x40004,
@@ -92,11 +100,11 @@ version_info = VSVersionInfo(
                     [
                         StringStruct('CompanyName', 'Omnya'),
                         StringStruct('FileDescription', 'Universal Media Player'),
-                        StringStruct('FileVersion', '1.4.0'),
+                        StringStruct('FileVersion', _app_version),
                         StringStruct('LegalCopyright', '© 2026 Omnya'),
                         StringStruct('OriginalFilename', 'Universal Media Player.exe'),
                         StringStruct('ProductName', 'Universal Media Player'),
-                        StringStruct('ProductVersion', '1.4.0')
+                        StringStruct('ProductVersion', _app_version)
                     ]
                 )
             ]

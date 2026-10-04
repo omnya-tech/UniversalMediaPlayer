@@ -199,10 +199,13 @@ class PlayerEngine:
     # (اختبارات مثلًا) يكون عندها القيمة.
     _is_opening = False
 
-    def __init__(self, on_video_frame=None, on_state_change=None, on_error=None, tr=None):
+    def __init__(self, on_video_frame=None, on_state_change=None, on_error=None, tr=None,
+                 on_stream_title=None):
         self.on_video_frame = on_video_frame
         self.on_state_change = on_state_change
         self.on_error = on_error
+        # بيتنادى (من خيط VLC) بعنوان "يُذاع الآن" كل ما يتغيّر في البث
+        self.on_stream_title = on_stream_title
         self.tr = tr
 
         self._video_hwnd = None
@@ -233,6 +236,11 @@ class PlayerEngine:
         # أي ضبط قبل وجوده كان بيضيع.
         self._volume = 1.0
         self._speed = 1.0
+        # المعادل: None = مطفي، وإلا (التضخيم المسبق، [عشر قيم]) بالديسيبل.
+        # محفوظ هنا لنفس سبب الصوت: المشغّل بيتعمل متأخر.
+        self._equalizer = None
+        self._is_stream = False
+        self._last_stream_title = None
         self._init_attempts = 0
         self._init_error = None
         self._init_lock = threading.Lock()
@@ -380,6 +388,9 @@ class PlayerEngine:
                 # 200 كفاية لأقراص الشبكة البطيئة، وأسرع بشكل محسوس
                 # في التقديم المتكرر.
                 "--file-caching=200",
+                # الراديو بيقطع أحيانًا: إعادة الاتصال تلقائيًا بدل ما
+                # البث يقف والمستخدم يفتكره خلص
+                "--http-reconnect",
             )
             self._player = self._instance.media_player_new()
         except Exception as exc:
@@ -421,6 +432,7 @@ class PlayerEngine:
             self._player.audio_set_volume(int(round(self._volume * 100)))
             self._player.audio_set_mute(self._muted)
             self._player.set_rate(self._speed)
+            self._apply_equalizer()
         except Exception:
             # فشل الضبط مش سبب يوقف التشغيل: الملف يشتغل بالقيم
             # الافتراضية أحسن من إنه ما يشتغلش.
@@ -464,6 +476,13 @@ class PlayerEngine:
             self._play_requested_at = None
             logger.info("بدء الإخراج الصوتي %.0f م.ث بعد الطلب",
                         (time.perf_counter() - requested) * 1000)
+        # البث ما اتحلّلش قبل التشغيل (شوف _open_locked)، فوجود الفيديو
+        # بيبان هنا بس
+        if self._is_stream and not self._has_video_cached:
+            try:
+                self._has_video_cached = self._player.video_get_track_count() > 0
+            except Exception:
+                pass
         self._set_state(PlaybackState.PLAYING)
         self._ensure_audio_track_active()
         if self._pending_playing_seek is not None:
@@ -563,10 +582,14 @@ class PlayerEngine:
                 self.on_error(f"الملف غير موجود: {path}")
             return False
 
+        self._is_stream = "://" in path
+        self._last_stream_title = None
         try:
             stage = time.perf_counter()
             media = self._instance.media_new(path)
-            parsed_ok = self._parse_media_bounded(media)
+            # البث ما بيتحلّلش مسبقًا: التحليل المحلي ما بيقراش الشبكة
+            # أصلًا، والشبكي بيستنى السيرفر لحد 3 ثواني قبل ما الصوت يبدأ
+            parsed_ok = True if self._is_stream else self._parse_media_bounded(media)
             marks["تحليل الملف"] = time.perf_counter() - stage
         except Exception as exc:
             if self.on_error:
@@ -583,8 +606,14 @@ class PlayerEngine:
         self._media = media
         stage = time.perf_counter()
         self._has_video_cached = self._detect_has_video(media)
-        self._real_bit_rate = self._probe_real_bit_rate(path, media.get_duration())
+        self._real_bit_rate = None if self._is_stream else self._probe_real_bit_rate(path, media.get_duration())
         marks["قراءة الخصائص"] = time.perf_counter() - stage
+        if self._is_stream:
+            try:
+                media.event_manager().event_attach(
+                    vlc.EventType.MediaMetaChanged, self._on_vlc_meta_changed)
+            except Exception:
+                logger.debug("تعذّر متابعة بيانات البث", exc_info=True)
 
         stage = time.perf_counter()
         self._player.set_media(media)
@@ -847,6 +876,94 @@ class PlayerEngine:
         self._speed = max(0.5, min(2.0, float(factor)))
         if self._player is not None:
             self._player.set_rate(self._speed)
+
+    # ------------------------------------------------------------------ #
+    # البث
+
+    @property
+    def is_stream(self) -> bool:
+        return self._is_stream
+
+    def get_stream_title(self):
+        """
+        "يُذاع الآن" لو البث بيبعته (راديو ICY/Shoutcast)، وإلا اسم المحطة.
+        None لو مفيش أي منهم.
+        """
+        media = self._media
+        if media is None or not self._is_stream or vlc is None:
+            return None
+        for meta in (vlc.Meta.NowPlaying, vlc.Meta.Title):
+            try:
+                value = media.get_meta(meta)
+            except Exception:
+                value = None
+            if value and "://" not in value:
+                return value.strip() or None
+        return None
+
+    def _on_vlc_meta_changed(self, event):
+        # الحدث ده بيتكرر كتير بنفس القيمة (كل جزء من البث)، فبيتبلّغ
+        # التغيير الفعلي بس
+        title = self.get_stream_title()
+        if title and title != self._last_stream_title:
+            self._last_stream_title = title
+            if self.on_stream_title:
+                self.on_stream_title(title)
+
+    # ------------------------------------------------------------------ #
+    # المعادل
+
+    def set_equalizer(self, preamp=None, bands=None):
+        """
+        preamp=None يطفي المعادل. غير كده: التضخيم المسبق وقائمة قيم
+        النطاقات بالديسيبل (شوف core/equalizer.py للحدود).
+        """
+        if preamp is None:
+            self._equalizer = None
+        else:
+            self._equalizer = (float(preamp), [float(b) for b in (bands or [])])
+        if self._player is not None:
+            try:
+                self._apply_equalizer()
+            except Exception:
+                logger.exception("فشل تطبيق المعادل")
+
+    def _apply_equalizer(self):
+        if self._player is None or vlc is None:
+            return
+        if self._equalizer is None:
+            self._player.set_equalizer(None)
+            return
+        preamp, bands = self._equalizer
+        eq = vlc.AudioEqualizer()
+        eq.set_preamp(preamp)
+        for index, gain in enumerate(bands[:vlc.libvlc_audio_equalizer_get_band_count()]):
+            eq.set_amp_at_index(gain, index)
+        # libvlc بياخد نسخة من القيم، فالكائن بيتحرّر بعدها على طول
+        try:
+            self._player.set_equalizer(eq)
+        finally:
+            eq.release()
+
+    @staticmethod
+    def get_equalizer_preset_values(index):
+        """
+        (التضخيم المسبق، [القيم]) لنمط جاهز من libvlc، أو None لو VLC
+        مش متاحة. بيحمّل vlc لو لسه ما اتحمّلتش.
+        """
+        if not _load_vlc():
+            return None
+        try:
+            eq = vlc.libvlc_audio_equalizer_new_from_preset(int(index))
+            if not eq:
+                return None
+            count = vlc.libvlc_audio_equalizer_get_band_count()
+            values = (eq.get_preamp(), [eq.get_amp_at_index(i) for i in range(count)])
+            vlc.libvlc_audio_equalizer_release(eq)
+            return values
+        except Exception:
+            logger.debug("تعذّر قراءة نمط المعادل %s", index, exc_info=True)
+            return None
 
     @property
     def speed(self) -> float:

@@ -51,6 +51,17 @@ def get_shortcuts_list(lang: str = "ar") -> list:
             "الملف السابق في المجلد: Page Up",
             "تبديل وضع ملء الشاشة للفيديو: F11 أو Escape",
             "",
+            "=== الروابط وقوائم التشغيل ===",
+            "فتح رابط (راديو أو بث مباشر أو ملف على الإنترنت): Ctrl + U",
+            "إعلان ما يُذاع الآن في الراديو: حرف N",
+            "نافذة قائمة التشغيل (إضافة وحذف وترتيب): Ctrl + L",
+            "حفظ قائمة التشغيل الحالية كملف M3U8: Ctrl + S",
+            "داخل نافذة القائمة: Enter للتشغيل، Delete للحذف، Alt + السهم العلوي / السفلي للتحريك",
+            "",
+            "=== المعادل الصوتي ===",
+            "فتح نافذة المعادل الصوتي: Ctrl + E",
+            "نمط المعادل التالي / السابق: حرف Q / Shift + Q",
+            "",
             "=== الأدوات والنوافذ العامة ===",
             "فتح نافذة مسجل الصوت: Ctrl + Shift + R",
             "بدء / إيقاف التسجيل الصوتي المباشر: Ctrl + R",
@@ -104,6 +115,17 @@ def get_shortcuts_list(lang: str = "ar") -> list:
             "Next File in Folder: Page Down",
             "Previous File in Folder: Page Up",
             "Toggle Video Fullscreen: F11 or Escape",
+            "",
+            "=== Links & Playlists ===",
+            "Open URL (radio, live stream, or online file): Ctrl + U",
+            "Announce radio now-playing: N",
+            "Playlist window (add, remove, reorder): Ctrl + L",
+            "Save the current playlist as M3U8: Ctrl + S",
+            "Inside the Playlist window: Enter plays, Delete removes, Alt + Up / Down Arrow moves",
+            "",
+            "=== Equalizer ===",
+            "Open the Equalizer window: Ctrl + E",
+            "Next / Previous equalizer preset: Q / Shift + Q",
             "",
             "=== Tools & Windows ===",
             "Open Audio Recorder Window: Ctrl + Shift + R",
@@ -235,7 +257,22 @@ def build_user_guide_html(tr, seek_kwargs: dict = None) -> str:
             )
         )
 
-        sec7_title = "7. دليل اختصارات لوحة المفاتيح الشامل"
+        sec_new_title = "7. الراديو وقوائم التشغيل والمعادل الصوتي"
+        sec_new_body = (
+            "• <b>تشغيل الروابط:</b> <code>Ctrl+U</code> يفتح خانة الرابط — وإن كنت نسخت رابطًا قبلها تجده مكتوبًا. "
+            "يشغّل الراديو والبث المباشر والملفات على الإنترنت، ويعيد الاتصال تلقائيًا إذا انقطع البث.\n"
+            "• <b>ما يُذاع الآن:</b> في محطات الراديو التي ترسل اسم الأغنية أو البرنامج، يُعلَن الاسم كلما تغيّر، "
+            "و<code>N</code> يعيده لك في أي وقت.\n"
+            "• <b>قوائم تشغيل خاصة بك:</b> <code>Ctrl+L</code> يفتح القائمة الحالية: أضف ملفات من أي مجلد أو روابط "
+            "محطات، واحذف بـ <code>Delete</code>، ورتّب بـ <code>Alt</code> مع الأسهم، ثم احفظها بـ <code>Ctrl+S</code>. "
+            "تُحفظ بصيغة M3U8 التي تفتحها معظم المشغلات، وإن كانت الملفات داخل مجلد القائمة تبقى القائمة صالحة إذا نقلت "
+            "المجلد كله. افتح أي قائمة (M3U أو M3U8 أو PLS) مثل أي ملف بـ <code>Ctrl+O</code>.\n"
+            "• <b>المعادل الصوتي:</b> <code>Q</code> و<code>Shift+Q</code> يتنقلان بين 18 نمطًا جاهزًا (منها «سماعات الرأس» "
+            "و«جهير كامل» و«قاعة كبيرة») ويُنطق اسم كل نمط. <code>Ctrl+E</code> يفتح نافذة فيها عشرة نطاقات تعدّلها "
+            "بالأسهم وتسمع النتيجة فورًا، ويبقى اختيارك محفوظًا لكل الملفات."
+        )
+
+        sec7_title = "8. دليل اختصارات لوحة المفاتيح الشامل"
     else:
         intro_title = f"Welcome to {app_name}"
         intro_body = (
@@ -309,7 +346,22 @@ def build_user_guide_html(tr, seek_kwargs: dict = None) -> str:
             )
         )
 
-        sec7_title = "7. Complete Keyboard Shortcuts Map"
+        sec_new_title = "7. Radio, Playlists & Equalizer"
+        sec_new_body = (
+            "• <b>Play links:</b> <code>Ctrl+U</code> opens the URL box — a link you copied beforehand is already filled "
+            "in. Plays radio, live streams and online files, and reconnects automatically if the stream drops.\n"
+            "• <b>Now playing:</b> on radio stations that send the song or show name, it is announced whenever it "
+            "changes, and <code>N</code> repeats it any time.\n"
+            "• <b>Your own playlists:</b> <code>Ctrl+L</code> opens the current playlist: add files from any folder or "
+            "station links, remove with <code>Delete</code>, reorder with <code>Alt</code> and the arrows, then save with "
+            "<code>Ctrl+S</code> as M3U8, which most players open. Open any M3U, M3U8 or PLS playlist with "
+            "<code>Ctrl+O</code>.\n"
+            "• <b>Equalizer:</b> <code>Q</code> and <code>Shift+Q</code> cycle 18 presets and speak each name. "
+            "<code>Ctrl+E</code> opens a window with ten bands you adjust with the arrows and hear immediately; your "
+            "choice is kept for all files."
+        )
+
+        sec7_title = "8. Complete Keyboard Shortcuts Map"
 
     raw_shortcuts = get_shortcuts_list(lang)
     formatted_shortcuts_html = []
@@ -457,6 +509,9 @@ def build_user_guide_html(tr, seek_kwargs: dict = None) -> str:
 
         <h2>{sec6_title}</h2>
         <p>{sec6_body}</p>
+
+        <h2>{sec_new_title}</h2>
+        <p>{sec_new_body}</p>
 
         <h2>{sec7_title}</h2>
         {shortcuts_block}

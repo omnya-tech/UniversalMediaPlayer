@@ -8,10 +8,10 @@
 ; طريقة البناء:
 ; - افتحي هذا الملف بواسطة Inno Setup Compiler ثم اختاري Build > Compile.
 ;
-; سيكون الناتج في installer_output\Universal_Media_Player_Setup_1.4.0.exe
+; سيكون الناتج في installer_output\Universal_Media_Player_Setup_1.5.0.exe
 
 #define MyAppName "Universal Media Player"
-#define MyAppVersion "1.4.0"
+#define MyAppVersion "1.5.0"
 #define MyAppExeName "Universal Media Player.exe"
 #define MyAppPublisher "Omnya Technology"
 

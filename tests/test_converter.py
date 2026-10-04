@@ -1,16 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 اختبارات تكاملية لـ core.converter.probe_media_info() باستخدام ملف
-وسائط صغير حقيقي (مولَّد بـ ffmpeg، مش mock) - عشان نتأكد إن التحليل
+وسائط صغير حقيقي (مولَّد بـ PyAV، مش mock) - عشان نتأكد إن التحليل
 بيرجّع خصائص حقيقية فعلًا (مش أرقام تخمينية أو ثابتة)، وإن أي خاصية
 غير معلنة في الملف بترجع None صراحةً بدل قيمة افتراضية.
 
-الاختبارات دي بتحتاج ffmpeg (لتوليد ملف الاختبار) ومكتبة PyAV (av)
-متاحين في البيئة. لو أي منهم مش متاح، الاختبارات بتتخطى (skip) تلقائيًا.
+الاختبارات دي بتحتاج مكتبة PyAV (av) متاحة في البيئة (للتوليد
+وللتحليل). لو مش متاحة، الاختبارات بتتخطى (skip) تلقائيًا.
 """
-
-import shutil
-import subprocess
 
 import pytest
 
@@ -29,56 +26,27 @@ from core.converter import (
     pick_closest_audio_bitrate,
     probe_media_info,
 )
+from tests.media_samples import write_sample_media
 
-FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None
 requires_av = pytest.mark.skipif(not AV_AVAILABLE, reason="مكتبة PyAV غير متاحة في هذه البيئة")
-requires_ffmpeg = pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg غير متاح في هذه البيئة")
 
 
 @pytest.fixture(scope="module")
 def sample_video_file(tmp_path_factory):
-    if not FFMPEG_AVAILABLE:
-        pytest.skip("ffmpeg غير متاح في هذه البيئة")
-    out_dir = tmp_path_factory.mktemp("media")
-    out_path = str(out_dir / "sample.mp4")
-    subprocess.run(
-        [
-            "ffmpeg", "-y",
-            "-f", "lavfi", "-i", "testsrc=duration=2:size=160x120:rate=10",
-            "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
-            "-c:v", "libx264", "-b:v", "500k",
-            "-c:a", "aac", "-b:a", "128k",
-            "-shortest", out_path,
-        ],
-        check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    out_path = str(tmp_path_factory.mktemp("media") / "sample.mp4")
+    write_sample_media(out_path, audio_bit_rate=128_000, video_bit_rate=500_000)
     return out_path
 
 
 @pytest.fixture(scope="module")
 def sample_audio_only_file(tmp_path_factory):
-    if not FFMPEG_AVAILABLE:
-        pytest.skip("ffmpeg غير متاح في هذه البيئة")
-    out_dir = tmp_path_factory.mktemp("media")
-    out_path = str(out_dir / "sample.mp3")
-    subprocess.run(
-        [
-            "ffmpeg", "-y",
-            "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
-            "-c:a", "libmp3lame", "-b:a", "192k",
-            out_path,
-        ],
-        check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    out_path = str(tmp_path_factory.mktemp("media") / "sample.mp3")
+    write_sample_media(out_path, with_video=False, audio_codec="libmp3lame",
+                       audio_bit_rate=192_000)
     return out_path
 
 
 @requires_av
-@requires_ffmpeg
 def test_probe_media_info_video_file_reports_real_properties(sample_video_file):
     info = probe_media_info(sample_video_file)
 
@@ -97,7 +65,6 @@ def test_probe_media_info_video_file_reports_real_properties(sample_video_file):
 
 
 @requires_av
-@requires_ffmpeg
 def test_probe_media_info_audio_only_file_has_no_video_key(sample_audio_only_file):
     info = probe_media_info(sample_audio_only_file)
 
@@ -182,7 +149,8 @@ def test_pick_closest_audio_bitrate_picks_nearest_not_first():
     options = (32_000, 64_000, 128_000, 256_000)
     assert pick_closest_audio_bitrate(options, 130_000) == 128_000
     assert pick_closest_audio_bitrate(options, 1_000_000) == 256_000
-    assert pick_closest_audio_bitrate(options, 0) == 32_000
+    # صفر/بلا قيمة معناه «أعلى جودة» - الافتراضي الجديد لمعدل البت
+    assert pick_closest_audio_bitrate(options, 0) == 256_000
 
 
 def test_mp3_does_not_support_96khz_despite_old_generic_list():

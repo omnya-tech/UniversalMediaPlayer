@@ -4,7 +4,9 @@ import json
 import logging
 import os
 
+from core import equalizer
 from core.logging_setup import get_app_data_dir, get_documents_dir
+from core.streams import is_stream_url
 from i18n.strings import STRINGS
 
 logger = logging.getLogger(__name__)
@@ -69,11 +71,21 @@ class Settings:
             "announce_sleep_timer": True,
             "announce_settings_import_export": True,
             "announce_fullscreen": True,
+            "announce_equalizer": True,
+            # "يُذاع الآن" في الراديو كل ما الأغنية/البرنامج يتغيّر
+            "announce_stream_title": True,
 
             "bookmarks": {},
             "file_speeds": {},
             "window_geometry": None,
             "sleep_timer_last_minutes": _DEFAULT_SLEEP_TIMER_MINUTES,
+
+            # المعادل (شوف core/equalizer.py): النمط، وقيم "مخصص"
+            "equalizer_mode": equalizer.MODE_OFF,
+            "equalizer_custom_preamp": 0.0,
+            "equalizer_custom_bands": [0.0] * equalizer.BAND_COUNT,
+            # آخر مجلد اتحفظت فيه أو اتفتحت منه قائمة تشغيل
+            "playlist_last_folder": "",
 
             # إعدادات محول الصيغ
             "converter_default_is_video": False,
@@ -247,7 +259,8 @@ class Settings:
         self.save()
 
     def get_recent_files(self):
-        return [p for p in self._data["recent_files"] if os.path.exists(p)]
+        # الروابط مالهاش وجود على القرص، فبتفضل في القائمة دايمًا
+        return [p for p in self._data["recent_files"] if is_stream_url(p) or os.path.exists(p)]
 
     def get_max_recent_files(self) -> int:
         value = int(self._data.get("max_recent_files", _DEFAULT_MAX_RECENT_FILES))
@@ -804,6 +817,52 @@ class Settings:
 
     def set_sleep_timer_last_minutes(self, minutes: int):
         self._data["sleep_timer_last_minutes"] = max(1, int(minutes))
+        self.save()
+
+    # ------------------------------------------------------------------ #
+    # المعادل
+    # ------------------------------------------------------------------ #
+    def get_equalizer_mode(self) -> str:
+        mode = self._data.get("equalizer_mode", equalizer.MODE_OFF)
+        return mode if equalizer.is_valid_mode(mode) else equalizer.MODE_OFF
+
+    def set_equalizer_mode(self, mode: str):
+        self._data["equalizer_mode"] = mode if equalizer.is_valid_mode(mode) else equalizer.MODE_OFF
+        self.save()
+
+    def get_equalizer_custom(self):
+        """(التضخيم المسبق، [عشر قيم]) - دايمًا صالحة ومحصورة في الحدود."""
+        preamp = equalizer.clamp_gain(self._data.get("equalizer_custom_preamp", 0.0))
+        bands = equalizer.normalize_bands(self._data.get("equalizer_custom_bands"))
+        return preamp, bands
+
+    def set_equalizer_custom(self, preamp, bands):
+        self._data["equalizer_custom_preamp"] = equalizer.clamp_gain(preamp)
+        self._data["equalizer_custom_bands"] = equalizer.normalize_bands(bands)
+        self.save()
+
+    def has_equalizer_custom(self) -> bool:
+        """هل فيه قيم مخصصة فعلًا (مش كلها أصفار)؟"""
+        preamp, bands = self.get_equalizer_custom()
+        return any(bands) or bool(preamp)
+
+    def get_announce_equalizer(self) -> bool: return self._get_announce_flag("announce_equalizer")
+
+    def set_announce_equalizer(self, enabled: bool): self._set_announce_flag("announce_equalizer", enabled)
+
+    def get_announce_stream_title(self) -> bool: return self._get_announce_flag("announce_stream_title")
+
+    def set_announce_stream_title(self, enabled: bool): self._set_announce_flag("announce_stream_title", enabled)
+
+    # ------------------------------------------------------------------ #
+    # قوائم التشغيل
+    # ------------------------------------------------------------------ #
+    def get_playlist_last_folder(self) -> str:
+        folder = self._data.get("playlist_last_folder") or ""
+        return folder if isinstance(folder, str) and os.path.isdir(folder) else ""
+
+    def set_playlist_last_folder(self, folder: str):
+        self._data["playlist_last_folder"] = folder or ""
         self.save()
 
     # ------------------------------------------------------------------ #

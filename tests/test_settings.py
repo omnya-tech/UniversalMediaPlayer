@@ -13,14 +13,13 @@ def test_announce_seek_mode_default_and_roundtrip(tmp_path):
     settings_path = str(tmp_path / "settings.json")
     settings = Settings(path=settings_path)
     assert settings.get_announce_seek_mode() == "enabled"
-    assert settings.get_announce_seek_interval_seconds() == 5
+    assert settings.get_announce_seek_min_seconds() == 0
 
-    settings.set_announce_seek_mode("enabled_interval")
-    settings.set_announce_seek_interval_seconds(30)
+    settings.set_announce_seek_min_seconds(300)
 
     reloaded = Settings(path=settings_path)
-    assert reloaded.get_announce_seek_mode() == "enabled_interval"
-    assert reloaded.get_announce_seek_interval_seconds() == 30
+    assert reloaded.get_announce_seek_mode() == "enabled"
+    assert reloaded.get_announce_seek_min_seconds() == 300
     assert reloaded.get_announce_seek_feedback() is True
 
     reloaded.set_announce_seek_mode("disabled")
@@ -30,8 +29,9 @@ def test_announce_seek_mode_default_and_roundtrip(tmp_path):
 def test_announce_seek_mode_rejects_invalid_values(tmp_path):
     settings_path = str(tmp_path / "settings.json")
     settings = Settings(path=settings_path)
-    settings.set_announce_seek_interval_seconds(999)
-    assert settings.get_announce_seek_interval_seconds() == 5
+    # أي قيمة برّه مقادير القفز المعروفة بترجع لصفر (إعلان كل قفزة)
+    settings.set_announce_seek_min_seconds(999)
+    assert settings.get_announce_seek_min_seconds() == 0
     settings.set_announce_seek_mode("not_a_real_mode")
     assert settings.get_announce_seek_mode() == "enabled"
 
@@ -209,13 +209,28 @@ def test_custom_output_folder_overrides_language_based_default(tmp_path):
     assert settings.get_converter_output_folder() == custom
     settings.set_language("en")
     assert settings.get_converter_output_folder() == custom
+
+
+def test_recorder_default_audio_bitrate_defaults_to_highest_and_roundtrips(tmp_path):
+    """صفر معناه «أعلى جودة متاحة للصيغة» - ده الافتراضي الجديد."""
     settings_path = str(tmp_path / "settings.json")
     settings = Settings(path=settings_path)
-    assert settings.get_recorder_default_audio_bitrate() == 192_000
+    assert settings.get_recorder_default_audio_bitrate() == 0
 
     settings.set_recorder_default_audio_bitrate(320_000)
     reloaded = Settings(path=settings_path)
     assert reloaded.get_recorder_default_audio_bitrate() == 320_000
+
+
+def test_old_192k_recorder_default_migrates_to_highest(tmp_path):
+    """192 كان افتراضيًا قديمًا مش اختيار مستخدم، فبيتحوّل للافتراضي الجديد."""
+    settings_path = str(tmp_path / "settings.json")
+    with open(settings_path, "w", encoding="utf-8") as f:
+        json.dump({"recorder_default_audio_bitrate": 192_000}, f)
+    assert Settings(path=settings_path).get_recorder_default_audio_bitrate() == 0
+
+
+def test_recorder_default_bit_depth_default_roundtrip_and_validation(tmp_path):
     settings_path = str(tmp_path / "settings.json")
     settings = Settings(path=settings_path)
     assert settings.get_recorder_default_bit_depth() == 16

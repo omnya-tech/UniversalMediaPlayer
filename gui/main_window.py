@@ -15,12 +15,16 @@ import wx
 from core.engine import PlayerEngine, PlaybackState
 from core.logging_setup import get_app_data_dir
 from core.playlist import Playlist, SUPPORTED_EXTENSIONS, is_video_extension
+from core.playlist_files import is_playlist_file
 from core.settings import Settings
+from core.streams import is_stream_url
 from accessibility.announcer import ScreenReaderAnnouncer, _resource_path
 from i18n.strings import Translator
 from gui import player_icons
 from gui.format_utils import format_time
 from gui.bookmarks_mixin import BookmarksMixin
+from gui.equalizer_mixin import EqualizerMixin
+from gui.playlist_mixin import PlaylistMixin, open_media_wildcard
 from gui.sleep_timer_mixin import SleepTimerDialog, SleepTimerMixin
 from gui.seeking_mixin import SeekingMixin
 from gui.tools_mixin import ToolsMixin
@@ -93,6 +97,10 @@ class _MediaDropTarget(wx.FileDropTarget):
             self._main_window.open_converter_with_folder(filenames[0])
             return True
 
+        if len(filenames) == 1 and is_playlist_file(filenames[0]):
+            self._main_window._open_specific_path(filenames[0])
+            return True
+
         media_files = []
         for item in filenames:
             if os.path.isfile(item) and os.path.splitext(item)[1].lower() in SUPPORTED_EXTENSIONS:
@@ -117,7 +125,8 @@ class _MediaDropTarget(wx.FileDropTarget):
 
 
 
-class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin, wx.Frame):
+class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin,
+                 EqualizerMixin, PlaylistMixin, wx.Frame):
     SEEK_NORMAL_SECONDS = 10
     SEEK_CTRL_SECONDS = 60
     SEEK_SHIFT_SECONDS = 5 * 60
@@ -171,13 +180,15 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin, wx.F
         self._bg_image = None
 
         self.engine = PlayerEngine(on_state_change=self._on_state_change,
-                                   on_error=self._on_error, tr=self.tr)
+                                   on_error=self._on_error, tr=self.tr,
+                                   on_stream_title=self._on_stream_title_changed)
         # تجهيز المحرك في الخلفية من دلوقتي (شوف PlayerEngine.warm_up):
         # أول ملف بيتفتح كان بيستنى تحميل المكتبات كلها.
         # كده الانتظار ده بيحصل والمستخدم لسه بيختار الملف.
         # (_load_and_play بيعلن الانتظار لو لسه ما خلصش)
         self.engine.warm_up()
         self.playlist = Playlist()
+        self._init_playlist_state()
         self._current_file_name = ""
         self._current_file_path = None
         self._current_format = ""
@@ -210,6 +221,7 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin, wx.F
         self.volume_slider.SetValue(initial_volume)
         self.engine.set_volume(initial_volume / 100.0)
         self.vol_pct_label.SetLabel(f"{initial_volume}%")
+        self._restore_equalizer()
 
         self.Bind(wx.EVT_CLOSE, self._on_close)
         self.Bind(wx.EVT_CHAR_HOOK, self._on_char_hook)
@@ -625,6 +637,11 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin, wx.F
         file_menu = wx.Menu()
         open_item = file_menu.Append(wx.ID_OPEN, f"{self.tr.t('menu_open')}\tCtrl+O")
         open_folder_item = file_menu.Append(wx.ID_ANY, f"{self.tr.t('menu_open_folder')}\tCtrl+Shift+O")
+        open_url_item = file_menu.Append(wx.ID_ANY, f"{self.tr.t('menu_open_url')}\tCtrl+U")
+        file_menu.AppendSeparator()
+        playlist_item = file_menu.Append(wx.ID_ANY, f"{self.tr.t('menu_playlist')}\tCtrl+L")
+        save_playlist_item = file_menu.Append(wx.ID_ANY, f"{self.tr.t('menu_save_playlist')}\tCtrl+S")
+        file_menu.AppendSeparator()
         self._recent_menu = wx.Menu()
         file_menu.AppendSubMenu(self._recent_menu, self.tr.t("menu_recent_files"))
         file_menu.AppendSeparator()
@@ -646,6 +663,7 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin, wx.F
         remaining_item = playback_menu.Append(wx.ID_ANY, f"{self.tr.t('menu_announce_remaining')}\tR")
         duration_item = playback_menu.Append(wx.ID_ANY, f"{self.tr.t('menu_announce_duration')}\tE")
         time_status_item = playback_menu.Append(wx.ID_ANY, f"{self.tr.t('menu_time_status')}\tT")
+        stream_title_item = playback_menu.Append(wx.ID_ANY, f"{self.tr.t('menu_stream_title')}\tN")
         playback_menu.AppendSeparator()
         speed_increase_item = playback_menu.Append(wx.ID_ANY, f"{self.tr.t('menu_speed_increase')}\tAlt+Up")
         speed_decrease_item = playback_menu.Append(wx.ID_ANY, f"{self.tr.t('menu_speed_decrease')}\tAlt+Down")
@@ -656,6 +674,12 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin, wx.F
         bookmark_previous_item = playback_menu.Append(wx.ID_ANY, f"{self.tr.t('menu_bookmark_previous')}\tShift+F2")
         bookmark_clear_item = playback_menu.Append(wx.ID_ANY, f"{self.tr.t('menu_bookmark_clear')}\tCtrl+Shift+B")
         menubar.Append(playback_menu, self.tr.t("menu_playback"))
+
+        audio_menu = wx.Menu()
+        equalizer_item = audio_menu.Append(wx.ID_ANY, f"{self.tr.t('menu_equalizer')}\tCtrl+E")
+        equalizer_next_item = audio_menu.Append(wx.ID_ANY, f"{self.tr.t('menu_equalizer_next')}\tQ")
+        equalizer_previous_item = audio_menu.Append(wx.ID_ANY, f"{self.tr.t('menu_equalizer_previous')}\tShift+Q")
+        menubar.Append(audio_menu, self.tr.t("menu_audio"))
 
         tools_menu = wx.Menu()
         options_item = tools_menu.Append(wx.ID_PREFERENCES, f"{self.tr.t('menu_options')}\tCtrl+Shift+P")
@@ -682,6 +706,13 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin, wx.F
 
         self.Bind(wx.EVT_MENU, self._on_open, open_item)
         self.Bind(wx.EVT_MENU, self._on_open_folder, open_folder_item)
+        self.Bind(wx.EVT_MENU, self._on_open_url, open_url_item)
+        self.Bind(wx.EVT_MENU, self._on_playlist_dialog, playlist_item)
+        self.Bind(wx.EVT_MENU, self._on_save_playlist, save_playlist_item)
+        self.Bind(wx.EVT_MENU, self._on_announce_stream_title, stream_title_item)
+        self.Bind(wx.EVT_MENU, self._on_equalizer, equalizer_item)
+        self.Bind(wx.EVT_MENU, lambda e: self._cycle_equalizer(1), equalizer_next_item)
+        self.Bind(wx.EVT_MENU, lambda e: self._cycle_equalizer(-1), equalizer_previous_item)
         self.Bind(wx.EVT_MENU, self._on_options, options_item)
         self.Bind(wx.EVT_MENU, lambda e: self.Close(), exit_item)
         self.Bind(wx.EVT_MENU, self._on_play_pause, play_item)
@@ -784,7 +815,7 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin, wx.F
         with wx.FileDialog(
             self,
             self.tr.t("dialog_open_title"),
-            wildcard=self.tr.t("dialog_open_media_wildcard"),
+            wildcard=open_media_wildcard(self.tr),
             style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST,
         ) as dlg:
             dlg.SetFilterIndex(0)
@@ -816,6 +847,12 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin, wx.F
         self._open_specific_path(first_file)
 
     def _open_specific_path(self, path):
+        # روابط وملفات قوائم ليها طريقها (شوف PlaylistMixin._open_any)
+        if self._open_any(path):
+            return
+        if is_playlist_file(path) or is_stream_url(path):
+            # قائمة فشلت (والخطأ اتعرض): ما تتسلّمش لـ VLC كملف وسائط
+            return
         self._save_current_position()
         self.playlist.load_folder_of(path)
         self._load_and_play(self.playlist.current or path)
@@ -876,12 +913,17 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin, wx.F
             self._refresh_transport_buttons_state()
             return
 
-        self._current_format = os.path.splitext(path)[1].lstrip(".").upper()
+        is_stream = is_stream_url(path)
+        if is_stream:
+            self._current_format = self.tr.t("stream_format")
+        else:
+            self._current_format = os.path.splitext(path)[1].lstrip(".").upper()
         self._current_file_path = path
-        self._current_file_name = os.path.basename(path)
+        self._current_file_name = self._display_name(path)
         self._update_window_title()
 
-        has_video = is_video_extension(os.path.splitext(path)[1])
+        # البث: الفيديو بيبان بعد ما يبدأ (شوف _apply_state_change)
+        has_video = False if is_stream else is_video_extension(os.path.splitext(path)[1])
         self._apply_media_layout(has_video)
 
         self.file_label.SetLabel(self._current_file_name)
@@ -909,7 +951,9 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin, wx.F
         self._announce(self.tr.t("announce_file_loaded", name=self._current_file_name), "announce_file_loaded")
 
         info = self.engine.get_media_info()
-        if info:
+        if is_stream:
+            self._announce(self.tr.t("announce_stream_info"), "announce_file_info")
+        elif info:
             duration_text = format_time(info["duration"])
             bit_rate = info.get("bit_rate")
             if bit_rate:
@@ -924,7 +968,8 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin, wx.F
         # إلغاء التركيز عن العناصر ونقله للنافذة الرئيسية للتحكم باختصارات لوحة المفاتيح
         self.SetFocus()
 
-        last_position = self.settings.get_last_position(path)
+        # البث المباشر مالوش موضع يتستكمل منه
+        last_position = 0.0 if is_stream else self.settings.get_last_position(path)
         if last_position > 1.0 and self.settings.get_auto_resume():
             self.engine.play_and_seek(last_position)
             self._announce(self.tr.t("announce_resume_position", time=format_time(last_position)), "announce_resume_position")
@@ -947,7 +992,7 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin, wx.F
             return
 
         for path in recent:
-            item = self._recent_menu.Append(wx.ID_ANY, os.path.basename(path))
+            item = self._recent_menu.Append(wx.ID_ANY, self._display_name(path))
             self.Bind(wx.EVT_MENU, lambda evt, p=path: self._open_specific_path(p), item)
 
     def _on_play_pause(self, event):
@@ -971,7 +1016,7 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin, wx.F
         self._load_and_play(target_path)
 
     def _save_current_position(self):
-        if self._current_file_path:
+        if self._current_file_path and not is_stream_url(self._current_file_path):
             self.settings.set_last_position(self._current_file_path, self.engine.get_current_position())
 
     def _on_toggle_mute(self, event):
@@ -1217,6 +1262,8 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin, wx.F
             else: self._announce(status_text, "announce_playback_state")
 
         is_playing = state == PlaybackState.PLAYING
+        if is_playing and self.engine.is_stream:
+            self._apply_media_layout(self.engine.has_video)
 
         # الزر بأيقونة مرسومة والاسم المنطوق نص صريح: الأيقونات القديمة
         # كانت رموز يونيكود بيقراها القارئ حرفيًا
@@ -1372,6 +1419,14 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin, wx.F
         bind(wx.ACCEL_NORMAL, ord("R"), self._on_announce_remaining_time)
         bind(wx.ACCEL_NORMAL, ord("E"), self._on_announce_duration)
         bind(wx.ACCEL_NORMAL, ord("T"), self._on_announce_time_status)
+        bind(wx.ACCEL_NORMAL, ord("N"), self._on_announce_stream_title)
+
+        bind(wx.ACCEL_SHIFT, ord("Q"), lambda e: self._cycle_equalizer(-1))
+        bind(wx.ACCEL_NORMAL, ord("Q"), lambda e: self._cycle_equalizer(1))
+        bind(wx.ACCEL_CTRL, ord("E"), self._on_equalizer)
+        bind(wx.ACCEL_CTRL, ord("U"), self._on_open_url)
+        bind(wx.ACCEL_CTRL, ord("L"), self._on_playlist_dialog)
+        bind(wx.ACCEL_CTRL, ord("S"), self._on_save_playlist)
 
         bind(wx.ACCEL_CTRL | wx.ACCEL_SHIFT, ord("R"), self._on_recorder)
         bind(wx.ACCEL_CTRL, ord("R"), self._on_start_recording_shortcut)
