@@ -1,4 +1,4 @@
-# سكريبت PowerShell بيجهّز مجلد جاهز فيه:
+﻿# سكريبت PowerShell بيجهّز مجلد جاهز فيه:
 #  - نسخة كاملة من مجلد Omnya (من dist\ اللي بنته PyInstaller
 #    بنسخة "onedir" - يعني Universal Media Player.exe + مجلد _internal بكل مكتباته)
 #  - ملف اختصار (.lnk) جاهز يشاور على الـ exe جوه المجلد ده
@@ -20,6 +20,13 @@ if (Test-Path $outputFolder) {
     Remove-Item $outputFolder -Recurse -Force
 }
 Copy-Item $distFolder -Destination $outputFolder -Recurse
+
+# الرخصة وتراخيص المكتبات من المشروع مباشرة، فلا تخرج نسخة بلا رخصة لو
+# بُني dist بنسخة قديمة من omnya_player.spec
+Copy-Item "LICENSE", "THIRD-PARTY.md" -Destination $outputFolder -Force
+New-Item -ItemType Directory -Force (Join-Path $outputFolder "licenses") | Out-Null
+Copy-Item "licenses\*" -Destination (Join-Path $outputFolder "licenses") -Recurse -Force
+Copy-Item "resources\NVDA-LICENSE-NOTICE.md" -Destination (Join-Path $outputFolder "licenses") -Force
 
 $fullOutputFolder = (Resolve-Path $outputFolder).Path
 $targetPath = Join-Path $fullOutputFolder "Universal Media Player.exe"

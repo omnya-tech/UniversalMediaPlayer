@@ -1,4 +1,4 @@
-; ملف إعدادات Inno Setup لبناء مثبّت (Installer) لبرنامج مشغل الوسائط الشامل.
+﻿; ملف إعدادات Inno Setup لبناء مثبّت (Installer) لبرنامج مشغل الوسائط الشامل.
 ;
 ; المتطلبات:
 ; 1) يجب بناء dist\Universal Media Player\Universal Media Player.exe مسبقًا باستخدام PyInstaller.
@@ -27,6 +27,8 @@ DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 UninstallDisplayIcon={app}\{#MyAppExeName}
 SetupIconFile=resources\omnya_icon.ico
+; صفحة الرخصة أثناء التثبيت (GPL v3)
+LicenseFile=LICENSE
 OutputDir=installer_output
 OutputBaseFilename=Universal_Media_Player_Setup_{#MyAppVersion}
 Compression=lzma
@@ -65,8 +67,13 @@ english.WarmingUp=Preparing the playback engine for first use...
 
 [Files]
 Source: "dist\Universal Media Player\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-; الرخصة وTHIRD-PARTY.md ومجلد licenses داخل dist نفسه (يضعها omnya_player.spec
-; بعد البناء)، فيصلان مع السطر السابق ومع النسخة المحمولة كذلك
+; الرخصة وتراخيص المكتبات بجانب البرنامج، من المشروع مباشرة: البناء يضعها في
+; dist أيضًا (للنسخة المحمولة)، لكن المثبّت لا يعتمد على ذلك، فبناء قديم لا
+; يُخرج مثبّتًا بلا رخصة
+Source: "LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "THIRD-PARTY.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "licenses\*"; DestDir: "{app}\licenses"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "resources\NVDA-LICENSE-NOTICE.md"; DestDir: "{app}\licenses"; Flags: ignoreversion
 
 [Icons]
 ; ربط أسماء الاختصارات (على سطح المكتب وقائمة إبدأ) بمفتاح الترجمة cm:AppName

@@ -9,6 +9,7 @@ from core.version import APP_VERSION
 from i18n.plural import count_phrase
 from gui.audio_bitrate_widget import current_audio_bitrate_bps, refresh_audio_bitrate_choice
 from gui.dialog_helpers import bind_escape_closes, bind_space_like_enter
+from gui import theme
 from core.audio_recorder import SUPPORTED_BIT_DEPTHS
 from core.voice_enhance import ENHANCE_LEVELS
 from gui.value_choice import (
@@ -140,12 +141,18 @@ def _add_section(panel: wx.Window, sizer: wx.Sizer, title: str) -> wx.BoxSizer:
 def _add_hint(panel: wx.Window, sizer: wx.Sizer, text: str):
     """سطر شرح صغير تحت الخيار."""
     hint = wx.StaticText(panel, label=text)
-    hint.SetForegroundColour(wx.Colour(110, 110, 110))
+    hint.SetForegroundColour(theme.hint_colour())
     font = hint.GetFont()
     font.SetPointSize(max(7, font.GetPointSize() - 1))
     hint.SetFont(font)
     sizer.Add(hint, flag=wx.LEFT | wx.RIGHT | wx.BOTTOM, border=4)
     return hint
+
+
+def _light(setter, colour):
+    """لون ثابت مصمَّم لخلفية فاتحة: يُطبَّق في المظهر الفاتح وحده."""
+    if theme.custom_colours_allowed() and not theme.is_dark():
+        setter(colour)
 
 
 class AboutDialog(wx.Dialog):
@@ -154,7 +161,7 @@ class AboutDialog(wx.Dialog):
         self.tr = tr
 
         panel = wx.Panel(self)
-        panel.SetBackgroundColour(wx.Colour(248, 250, 252))
+        _light(panel.SetBackgroundColour, wx.Colour(248, 250, 252))
         main_sizer = wx.BoxSizer(wx.VERTICAL)
 
         # --- القسم العلوي: الأيقونة والعنوان ---
@@ -174,7 +181,7 @@ class AboutDialog(wx.Dialog):
         title_label = wx.StaticText(panel, label=tr.t('app_title'))
         title_font = wx.Font(18, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_BOLD)
         title_label.SetFont(title_font)
-        title_label.SetForegroundColour(wx.Colour(0, 70, 140))
+        _light(title_label.SetForegroundColour, wx.Colour(0, 70, 140))
 
         # رقم الإصدار بأرقام لاتينية كما في عنوان النافذة والمثبّت: ويندوز
         # يختار شكل الأرقام من الكلمة السابقة («الإصدار») فكتبه «١٫٥٫٠»؛
@@ -182,7 +189,7 @@ class AboutDialog(wx.Dialog):
         version_label = wx.StaticText(panel, label=tr.t("about_version", version="‎" + APP_VERSION))
         version_font = wx.Font(11, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_BOLD)
         version_label.SetFont(version_font)
-        version_label.SetForegroundColour(wx.Colour(80, 100, 120))
+        _light(version_label.SetForegroundColour, wx.Colour(80, 100, 120))
 
         title_sizer.Add(title_label, 0, wx.BOTTOM, 4)
         title_sizer.Add(version_label, 0, wx.BOTTOM, 0)
@@ -196,18 +203,18 @@ class AboutDialog(wx.Dialog):
         intro_label = wx.StaticText(panel, label=tr.t("about_vision_text"))
         intro_label.Wrap(450)
         intro_label.SetFont(wx.Font(10, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL))
-        intro_label.SetForegroundColour(wx.Colour(30, 30, 30))
+        _light(intro_label.SetForegroundColour, wx.Colour(30, 30, 30))
         main_sizer.Add(intro_label, 0, wx.ALL | wx.ALIGN_CENTER_HORIZONTAL, 20)
 
         # --- قسم الميزات ---
         features_box = wx.StaticBox(panel, label=tr.t("about_features_title"))
         features_box.SetFont(wx.Font(10, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_BOLD))
-        features_box.SetForegroundColour(wx.Colour(0, 70, 140))
+        _light(features_box.SetForegroundColour, wx.Colour(0, 70, 140))
         features_sizer = wx.StaticBoxSizer(features_box, wx.VERTICAL)
         
         features_label = wx.StaticText(panel, label=tr.t("about_features_text"))
         features_label.SetFont(wx.Font(10, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL))
-        features_label.SetForegroundColour(wx.Colour(50, 50, 50))
+        _light(features_label.SetForegroundColour, wx.Colour(50, 50, 50))
         features_sizer.Add(features_label, 0, wx.ALL, 10)
         
         main_sizer.Add(features_sizer, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 20)
@@ -218,11 +225,11 @@ class AboutDialog(wx.Dialog):
         
         publisher_label = wx.StaticText(panel, label=tr.t("about_publisher"))
         publisher_label.SetFont(wx.Font(11, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_BOLD))
-        publisher_label.SetForegroundColour(wx.Colour(20, 20, 20))
+        _light(publisher_label.SetForegroundColour, wx.Colour(20, 20, 20))
         
         copyright_label = wx.StaticText(panel, label=tr.t("about_copyright"))
         copyright_label.SetFont(wx.Font(9, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL))
-        copyright_label.SetForegroundColour(wx.Colour(120, 120, 120))
+        _light(copyright_label.SetForegroundColour, wx.Colour(120, 120, 120))
         # بيان الرخصة طويل: يُلف فلا يمدّ النافذة عرضًا
         copyright_label.Wrap(400)
 
@@ -334,6 +341,18 @@ class OptionsDialog(wx.Dialog):
 
         restart_note = wx.StaticText(panel, label=tr.t("options_restart_note"))
         lang_box.Add(restart_note, flag=wx.LEFT | wx.RIGHT | wx.TOP | wx.BOTTOM, border=8)
+
+        # مظهر البرنامج (gui/theme.py): يتبع ويندوز أو فاتح أو داكن
+        theme_box = _add_group_box(panel, general_sizer, tr.t("options_theme_label"))
+        self.theme_choice = wx.Choice(panel, choices=[tr.t(f"options_theme_{name}") for name in theme.THEMES])
+        self.theme_choice.SetName(tr.t("options_theme_label"))
+        self._initial_theme = settings.get_ui_theme()
+        self.theme_choice.SetSelection(theme.THEMES.index(self._initial_theme))
+        theme_box.Add(self.theme_choice, flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, border=4)
+        theme_note = wx.StaticText(panel, label=tr.t("options_theme_note"))
+        theme_note.Wrap(560)
+        theme_box.Add(theme_note, flag=wx.LEFT | wx.RIGHT | wx.TOP | wx.BOTTOM, border=8)
+        self.theme_changed = False
 
         recent_box = _add_group_box(panel, general_sizer, tr.t("options_max_recent_label"))
         max_recent = _safe_get_setting(settings, "max_recent_files", 10)
@@ -1187,6 +1206,9 @@ class OptionsDialog(wx.Dialog):
 
             def _do_save():
                 _safe_set_setting(self.settings, "language", new_lang)
+                new_theme = theme.THEMES[self.theme_choice.GetSelection()]
+                self.theme_changed = new_theme != self._initial_theme
+                self.settings.set_ui_theme(new_theme)
                 _safe_set_setting(self.settings, "auto_resume", self.auto_resume_checkbox.GetValue())
                 _safe_set_setting(self.settings, "max_recent_files", self.max_recent_spin.GetValue())
                 _safe_set_setting(self.settings, "enable_folder_navigation", self.folder_navigation_checkbox.GetValue())

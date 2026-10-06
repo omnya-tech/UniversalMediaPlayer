@@ -46,7 +46,7 @@ class Settings:
             "enable_global_media_keys": True,
             # اختصارات محرر الوسائط العامة (gui/editor_hotkeys.py)
             "enable_editor_hotkeys": True,
-            "ui_theme": "standard",
+            "ui_theme": "system",
             "on_playback_ended_action": "next_file",
 
             # إعلانات إمكانية الوصول
@@ -352,13 +352,19 @@ class Settings:
         self._data["enable_editor_hotkeys"] = bool(enabled)
         self.save()
 
-    _VALID_UI_THEMES = ("standard", "high_contrast", "dark", "light")
+    # يتبع ويندوز، أو فاتح، أو داكن (gui/theme.py). القيم القديمة: «standard»
+    # كان يُعرض فاتحًا، و«high_contrast» صار تلقائيًا (البرنامج يحترم تباين
+    # ويندوز العالي في كل مظهر)، فكلاهما يصير «يتبع ويندوز»
+    _VALID_UI_THEMES = ("system", "light", "dark")
+    _LEGACY_UI_THEMES = {"standard": "system", "high_contrast": "system"}
+
     def get_ui_theme(self) -> str:
-        value = self._data.get("ui_theme", "dark")
-        return value if value in self._VALID_UI_THEMES else "dark"
+        value = self._data.get("ui_theme", "system")
+        value = self._LEGACY_UI_THEMES.get(value, value)
+        return value if value in self._VALID_UI_THEMES else "system"
 
     def set_ui_theme(self, theme: str):
-        self._data["ui_theme"] = theme if theme in self._VALID_UI_THEMES else "dark"
+        self._data["ui_theme"] = theme if theme in self._VALID_UI_THEMES else "system"
         self.save()
 
     # «shutdown» اتشال: شوف load

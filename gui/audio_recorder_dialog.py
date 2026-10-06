@@ -31,6 +31,7 @@ from accessibility.announcer import _resource_path
 from core.notification_sound import play_completion_chime, play_error_chime
 from gui.audio_bitrate_widget import current_audio_bitrate_bps, refresh_audio_bitrate_choice
 from gui.dialog_helpers import bind_escape_closes
+from gui import theme
 from i18n.plural import count_phrase
 
 _logger = configure_logging()
@@ -160,7 +161,10 @@ class AudioRecorderDialog(wx.Frame):
 
     def _build_ui(self):
         panel = wx.Panel(self)
-        panel.SetBackgroundColour(wx.Colour(245, 247, 250))
+        # الخلفية الفاتحة في المظهر الفاتح وحده؛ في الداكن والتباين العالي
+        # لون النظام (كانت ثابتة، فتبقى لوحة فاتحة وسط نافذة داكنة)
+        if theme.custom_colours_allowed() and not theme.is_dark():
+            panel.SetBackgroundColour(wx.Colour(245, 247, 250))
         main_sizer = wx.BoxSizer(wx.VERTICAL)
         tr = self.tr
 

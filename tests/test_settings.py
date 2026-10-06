@@ -300,3 +300,18 @@ def test_recorder_default_bit_depth_default_roundtrip_and_validation(tmp_path):
     # كما هي أو التعطل
     settings.set_recorder_default_bit_depth(20)
     assert settings.get_recorder_default_bit_depth() == 16
+
+
+def test_theme_values_and_legacy_names(tmp_path):
+    """
+    يتبع ويندوز أو فاتح أو داكن. «standard» القديم كان يُعرض فاتحًا ويتبع
+    النظام عمليًا، و«high_contrast» صار تلقائيًا من ويندوز.
+    """
+    settings = Settings(path=str(tmp_path / "settings.json"))
+    assert settings.get_ui_theme() == "system"
+    for legacy, expected in (("standard", "system"), ("high_contrast", "system"),
+                             ("dark", "dark"), ("light", "light"), ("rainbow", "system")):
+        settings._data["ui_theme"] = legacy
+        assert settings.get_ui_theme() == expected
+    settings.set_ui_theme("dark")
+    assert Settings(path=str(tmp_path / "settings.json")).get_ui_theme() == "dark"

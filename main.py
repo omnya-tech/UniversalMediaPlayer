@@ -16,6 +16,7 @@ from gui.main_window import MainWindow
 from core.logging_setup import configure_logging, install_global_exception_hook
 from core.settings import Settings
 from i18n.strings import Translator
+from gui.theme import apply_app_theme
 
 PORT = 48215
 _app_mutex = None
@@ -252,6 +253,7 @@ def main():
     if "--converter-only" in args:
         app = wx.App(False)
         apply_interface_direction(app, lang)
+        apply_app_theme(app, settings.get_ui_theme())
         from gui.converter_dialog import ConverterDialog
         from accessibility.announcer import ScreenReaderAnnouncer
 
@@ -297,6 +299,8 @@ def main():
 
     app = wx.App(False)
     apply_interface_direction(app, lang)
+    # قبل أي نافذة: الوضع الداكن في ويندوز لا يُفعَّل بعد إنشائها
+    apply_app_theme(app, settings.get_ui_theme())
 
     # المجلدات القديمة (أسماء تتبع اللغة) تُضم للمجلدات الثلاثة الثابتة،
     # في خيط جانبي فلا يتأخر ظهور النافذة

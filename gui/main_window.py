@@ -22,6 +22,7 @@ from accessibility.announcer import ScreenReaderAnnouncer, _resource_path
 from i18n.strings import Translator
 from gui import player_icons
 from gui.format_utils import format_time
+from gui import theme
 from gui.bookmarks_mixin import BookmarksMixin
 from gui.editor_hotkeys import EditorHotkeysMixin
 from gui.equalizer_mixin import EqualizerMixin
@@ -538,22 +539,20 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin,
                 current_str = format_time(seek_target)
                 remaining_val = max(0.0, duration_val - seek_target)
                 current_label_text = f"🎯 {current_str}"
-                current_label_color = wx.Colour(230, 120, 0)
+                current_label_color = theme.colour("seek_target")
             else:
                 pos = self.engine.get_current_position()
                 current_str = format_time(pos)
                 remaining_val = max(0.0, duration_val - pos)
 
                 current_label_text = current_str
-                is_dark = self.settings.get_ui_theme() == "dark"
-                current_label_color = wx.Colour(0, 120, 215) if not is_dark else wx.Colour(100, 180, 255)
+                current_label_color = theme.colour("time_playing")
 
             remaining_str = format_time(remaining_val)
             remaining_label_text = f"-{remaining_str} / {total_str}"
         else:
             current_label_text = "00:00"
-            is_dark = self.settings.get_ui_theme() == "dark"
-            current_label_color = wx.BLACK if not is_dark else wx.WHITE
+            current_label_color = theme.colour("time_idle")
             remaining_label_text = "-00:00 / 00:00"
 
         if self.time_current_label.GetLabel() != current_label_text:
@@ -580,42 +579,34 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin,
         self.header_panel.Layout()
 
     def _apply_ui_theme(self):
-        is_dark = self.settings.get_ui_theme() == "dark"
+        """
+        ألوان النافذة من مظهر البرنامج (gui/theme.py).
 
-        main_bg = wx.Colour(20, 20, 20) if is_dark else wx.Colour(240, 243, 246)
-        header_bg = wx.Colour(30, 35, 45)
-        controls_bg = wx.Colour(35, 40, 50) if is_dark else wx.Colour(250, 252, 255)
+        المظهر يُحسم عند البدء؛ وفي التباين العالي لا لون من البرنامج
+        (theme.colour يرجع لون النظام).
+        """
+        c = theme.colour
+        self.main_panel.SetBackgroundColour(c("main_bg"))
+        self.header_panel.SetBackgroundColour(c("header_bg"))
+        self.controls_panel.SetBackgroundColour(c("controls_bg"))
 
-        text_primary = wx.WHITE
-        text_secondary = wx.Colour(170, 185, 205)
-        accent_color = wx.Colour(0, 120, 215)
+        self.file_label.SetForegroundColour(c("header_text"))
+        self.media_info_label.SetForegroundColour(c("header_secondary"))
+        self.sleep_timer_badge.SetForegroundColour(c("badge"))
 
-        self.main_panel.SetBackgroundColour(main_bg)
-        self.header_panel.SetBackgroundColour(header_bg)
-        self.controls_panel.SetBackgroundColour(controls_bg)
-
-        self.file_label.SetForegroundColour(text_primary)
-        self.media_info_label.SetForegroundColour(text_secondary)
-
-        seek_text = wx.Colour(100, 180, 255) if is_dark else wx.Colour(40, 50, 65)
-        self.time_current_label.SetForegroundColour(seek_text)
-        self.time_remaining_total_label.SetForegroundColour(wx.Colour(180, 190, 205) if is_dark else wx.Colour(100, 110, 125))
-
-        vol_text = wx.Colour(100, 255, 100) if is_dark else wx.Colour(0, 120, 0)
-        self.volume_label.SetForegroundColour(vol_text)
-        self.vol_pct_label.SetForegroundColour(vol_text)
-
-        btn_bg = wx.Colour(55, 60, 75) if is_dark else wx.Colour(255, 255, 255)
-        btn_fg = wx.WHITE if is_dark else wx.Colour(30, 35, 45)
+        self.time_current_label.SetForegroundColour(c("time_text"))
+        self.time_remaining_total_label.SetForegroundColour(c("time_remaining"))
+        self.volume_label.SetForegroundColour(c("volume_text"))
+        self.vol_pct_label.SetForegroundColour(c("volume_text"))
 
         for btn in [self.previous_button, self.seek_backward_button, self.stop_button, self.seek_forward_button, self.next_button]:
-            btn.SetBackgroundColour(btn_bg)
-            btn.SetForegroundColour(btn_fg)
+            btn.SetBackgroundColour(c("button_bg"))
+            btn.SetForegroundColour(c("button_fg"))
 
         # زر التشغيل بمظهر ويندوز الأصلي: أزرار ويندوز تتجاهل لون النص، فلما
         # تلوّنت خلفيته بالأزرق ظهر نصه باهتًا لا يكاد يُقرأ. يتميز بخطه العريض
         self.play_pause_button.SetBackgroundColour(wx.NullColour)
-        self.play_pause_button.SetForegroundColour(btn_fg if is_dark else wx.Colour(0, 84, 166))
+        self.play_pause_button.SetForegroundColour(c("play_fg"))
 
         # الأيقونات مرسومة بلون نص الزر وقت رسمها، فلازم تترسم من جديد
         # بعد تغيير الألوان وإلا تفضل بلون السمة القديمة

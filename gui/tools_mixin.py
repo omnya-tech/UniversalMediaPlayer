@@ -91,6 +91,10 @@ class ToolsMixin:
                     editor.apply_settings()
                 self._apply_ui_theme()
                 self._announce(self.tr.t("options_saved_announcement"))
+                if dialog.theme_changed:
+                    # الوضع الداكن في ويندوز لا يتغير والنوافذ مفتوحة
+                    wx.MessageBox(self.tr.t("options_theme_restart"), self.tr.t("options_dialog_title"),
+                                  wx.ICON_INFORMATION, self)
         finally: dialog.Destroy()
 
     def _on_about(self, event):
