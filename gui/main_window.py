@@ -521,7 +521,7 @@ class MainWindow(WindowLayoutMixin, FileOpenMixin, AnnounceMixin, KeyboardMixin,
         playback_menu.AppendSeparator()
         speed_increase_item = playback_menu.Append(wx.ID_ANY, f"{self.tr.t('menu_speed_increase')}\tAlt+Up")
         speed_decrease_item = playback_menu.Append(wx.ID_ANY, f"{self.tr.t('menu_speed_decrease')}\tAlt+Down")
-        speed_reset_item = playback_menu.Append(wx.ID_ANY, f"{self.tr.t('menu_speed_reset')}\tAlt+Numpad 0")
+        speed_reset_item = playback_menu.Append(wx.ID_ANY, f"{self.tr.t('menu_speed_reset')}\tAlt+KP_0")
         playback_menu.AppendSeparator()
         bookmark_add_item = playback_menu.Append(wx.ID_ANY, f"{self.tr.t('menu_bookmark_add')}\tCtrl+B")
         bookmark_next_item = playback_menu.Append(wx.ID_ANY, f"{self.tr.t('menu_bookmark_next')}\tF2")

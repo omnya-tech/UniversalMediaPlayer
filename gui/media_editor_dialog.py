@@ -721,7 +721,8 @@ class MediaEditorDialog(wx.Frame):
         # إعلان كل خطوة (25% افتراضيًا) يكفي ليعرف المستخدم أن العمل يتقدم
         # دون إزعاج؛ والصفر يعني لا إعلان حتى ينتهي
         step = self.settings.get_editor_progress_step() if self.settings else 25
-        if step and pct // step > self._last_pct // step and 0 < pct < 100:
+        # البداية من الصفر لا من -1: كان أول تحديث يُعلَن («10%») قبل بلوغ أول خطوة
+        if step and pct // step > max(self._last_pct, 0) // step and 0 < pct < 100:
             self.announce(f"{pct}%")
         self._last_pct = max(self._last_pct, pct)
 

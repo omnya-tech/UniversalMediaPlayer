@@ -876,9 +876,11 @@ class ConverterDialog(wx.Frame):
             )
         )
 
-        if pct > 0 and pct % 15 == 0 and pct != self._last_announced_pct:
-            self._last_announced_pct = pct
+        # إعلان عند عبور كل 15%، لا عند 15 بالضبط: التقدم يقفز (14 ثم 16)
+        # فكانت الملفات الكبيرة تُحوَّل كلها بلا إعلان واحد
+        if 0 < pct < 100 and pct // 15 > max(self._last_announced_pct, 0) // 15:
             self.announcer.announce(f"{pct}%")
+        self._last_announced_pct = max(self._last_announced_pct, pct)
 
     def _on_file_done(self, index, total, filename, success, error_message):
         wx.CallAfter(self._apply_file_done, index, total, filename, success, error_message)

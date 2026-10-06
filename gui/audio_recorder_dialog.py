@@ -565,6 +565,8 @@ class AudioRecorderDialog(MicCheckMixin, RecorderDevicesMixin, wx.Frame):
             self.exclusive_check,
         ):
             control.Enable()
+        # الستيريو كان معطّلًا لأن الجهاز أحادي، لا لأن التسجيل جارٍ
+        self._apply_channel_limit()
 
         self.elapsed_label.SetLabel("00:00")
         if final_path:

@@ -164,6 +164,13 @@ class RecorderDevicesMixin:
         self._remember_device_profile()
         event.Skip()
 
+    def _apply_channel_limit(self):
+        """الستيريو متاح فقط لجهاز له قناتان أو أكثر."""
+        devices = getattr(self, "_audio_devices", None) or []
+        selection = self.device_choice.GetSelection()
+        if 0 <= selection < len(devices):
+            self.channels_choice.Enable(devices[selection].max_channels >= 2)
+
     def _refresh_capabilities(self):
         """
         يضبط الإعدادات على ما يناسب الجهاز المختار.
