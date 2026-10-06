@@ -132,19 +132,19 @@ class ToolsMixin:
         webbrowser.open(f"file://{guide_path}")
 
     def _on_export_shortcuts_doc(self, event):
-        from gui.user_guide import get_shortcuts_list
+        from gui.user_guide import build_shortcuts_text
 
         with wx.FileDialog(self, self.tr.t("export_shortcuts_dialog_title"), wildcard="Text files|*.txt|All files|*.*", style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT) as dlg:
-            dlg.SetFilename("shortcuts_guide.txt")
+            dlg.SetFilename(self.tr.t("shortcuts_file_name"))
             if dlg.ShowModal() == wx.ID_CANCEL: return
             path = dlg.GetPath()
         if not path.lower().endswith(".txt"): path += ".txt"
-        header = self.tr.t("shortcuts_header", app_name=self.tr.t("app_title"))
-        shortcuts_list = get_shortcuts_list(getattr(self.tr, "lang", "ar"), **self._shortcuts_kwargs())
+        text = build_shortcuts_text(self.tr, **self._shortcuts_kwargs())
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(header + "\n" + "=" * len(header) + "\n\n")
-                for line in shortcuts_list: f.write(f"• {line}\n")
+            # BOM وأسطر ويندوز: المفكرة وبرامج ويندوز القديمة تقرأ العربية
+            # سليمة وتعرض كل سطر في مكانه
+            with open(path, "w", encoding="utf-8-sig", newline="\r\n") as f:
+                f.write(text)
             self._announce(self.tr.t("announce_shortcuts_export_success"))
             wx.MessageBox(f"{self.tr.t('announce_shortcuts_export_success')}:\n{path}", self.tr.t("export_shortcuts_dialog_title"), wx.ICON_INFORMATION)
         except Exception as e: wx.MessageBox(str(e), self.tr.t("title_error"), wx.ICON_ERROR)

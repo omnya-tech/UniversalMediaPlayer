@@ -123,7 +123,7 @@ STRINGS = {
         # ---- المساعدة والإرشادات ----
         "help_seek": "السهم الأيمن والأيسر: {normal} ثوانٍ، مع Ctrl: دقيقة واحدة، مع Shift: {shift} ثوانٍ (5 دقائق)، مع Alt: {minutes} دقائق، مع Ctrl+Shift: {ctrl_shift} ثانية (30 دقيقة)",
         "help_volume": "السهم لأعلى ولأسفل: رفع أو خفض مستوى الصوت، مع Ctrl: بخطوة أكبر",
-        "shortcuts_header": "=== دليل اختصارات لوحة المفاتيح — {app_name} ===",
+        "shortcuts_file_name": "دليل الاختصارات.txt",
         "shortcuts_dialog_title": "اختصارات لوحة المفاتيح",
 
         # ---- إعدادات والخيارات ----
@@ -813,7 +813,7 @@ STRINGS = {
         # ---- Help & Shortcuts ----
         "help_seek": "Left/Right: {normal}s, with Ctrl: 1 minute, with Shift: {shift}s (5 min), with Alt: {minutes} min, with Ctrl+Shift: {ctrl_shift}s (30 min)",
         "help_volume": "Up/Down arrows: raise or lower volume, with Ctrl: larger step",
-        "shortcuts_header": "=== Keyboard Shortcuts Guide — {app_name} ===",
+        "shortcuts_file_name": "Keyboard Shortcuts.txt",
         "shortcuts_dialog_title": "Keyboard Shortcuts",
 
         # ---- Options & Settings ----
