@@ -1,9 +1,19 @@
 # -*- coding: utf-8 -*-
 """
-وحدة دليل المستخدم وقائمة الاختصارات لمشغل الوسائط الشامل.
-تضم الدليل التوثيقي الكامل والشامل مع استخلاص منسق ومصنف للاختصارات باللغتين العربية والإنجليزية.
+دليل المستخدم وقائمة الاختصارات، بالعربية والإنجليزية.
+
+الدليل صفحة HTML تُفتح في المتصفح (F1): فهرس بروابط، وكل قسم عنوان
+وقائمة نقاط حقيقية، فيتنقل قارئ الشاشة بالعناوين (H) والقوائم (L)
+والروابط. والنسختان بالمحتوى نفسه نقطة بنقطة.
+
+قائمة الاختصارات تُعرض في آخر الدليل وتُصدَّر نصًا (Ctrl+Shift+H)، وفيها
+ما غيّره المستخدم من مقادير التقديم والاختصارات الشبحية.
 """
 
+import re
+from html import escape
+
+from core.version import APP_VERSION
 
 # سطور التقديم بمفاتيحها في القائمة، ونوع كل منها في الإعدادات
 _SEEK_LINE_KEYS = {
@@ -14,6 +24,8 @@ _SEEK_LINE_KEYS = {
            ("shift", "Shift + Right / Left Arrow"), ("alt", "Alt + Right / Left Arrow"),
            ("ctrl_shift", "Ctrl + Shift + Right / Left Arrow")),
 }
+
+_SEEK_DEFAULTS = {"normal": 10, "ctrl": 60, "shift": 300, "alt": 600, "ctrl_shift": 1800}
 
 
 def get_shortcuts_list(lang: str = "ar", seek_steps: dict = None, ghost_hotkeys: dict = None) -> list:
@@ -75,53 +87,54 @@ def _apply_ghost_hotkeys(lines, ghost_hotkeys):
 
 def _default_shortcuts_list(lang: str) -> list:
     """
-    إرجاع قائمة مرتبة ومصنفة بمهنية عالية باختصارات المشغل، 
-    تُستخدم للعرض أو عند التوليد والتصدير النصي لضمان أعلى مستويات التنسيق والوضوح.
+    الاختصارات بأقسامها: سطر «=== القسم ===» ثم «الوصف: المفاتيح».
+
+    سطور التقديم والاختصارات الشبحية تبقى بصيغتها هذه بالضبط:
+    _apply_seek_steps و_apply_ghost_hotkeys يعرفانها من آخرها.
     """
     if lang == "ar":
         return [
-            "=== التحكم والتشغيل الأساسي ===",
+            "=== التشغيل الأساسي ===",
             "تشغيل / إيقاف مؤقت: مسافة (Space)",
             "إيقاف التشغيل الكامل والإعادة للبداية: Ctrl + Space",
             "كتم / إلغاء كتم الصوت: حرف M",
             "رفع / خفض مستوى الصوت (بنسبة 5%): السهم العلوي / السفلي",
             "رفع / خفض مستوى الصوت السريع (بنسبة 20%): Ctrl + السهم العلوي / السفلي",
+            "تبديل وضع ملء الشاشة للفيديو: F11 أو Escape",
             "",
-            "=== التقديم والإرجاع التكيّفي ===",
+            "=== التقديم والإرجاع ===",
             "تقديم / إرجاع بـ 10 ثوانٍ: السهم الأيمن / الأيسر",
             "تقديم / إرجاع بدقيقة واحدة (60 ثانية): Ctrl + السهم الأيمن / الأيسر",
             "تقديم / إرجاع بـ 5 دقائق: Shift + السهم الأيمن / الأيسر",
             "تقديم / إرجاع بـ 10 دقائق: Alt + السهم الأيمن / الأيسر",
             "تقديم / إرجاع بـ 30 دقيقة: Ctrl + Shift + السهم الأيمن / الأيسر",
-            "القفز المباشر لنسبة مئوية من الملف (10% إلى 90%): أرقام لوحة الأرقام الجانبية (Numpad 1 إلى 9)",
-            "القفز لبداية الملف تمامًا: Numpad 0 أو Home",
+            "القفز المباشر لنسبة من الملف (10% إلى 90%): Numpad 1 إلى 9",
+            "القفز لبداية الملف: Numpad 0 أو Home",
             "القفز لنهاية الملف (آخر 5 ثوانٍ): End",
-            "تحديد أصغر قفزة يُعلَن عندها الموضع (دقيقة أو 5 أو 10 أو 30): من الخيارات، تبويب إمكانية الوصول",
-            "",
-            "=== التحكم بالسرعة والعلامات المرجعية ===",
-            "زيادة / تقليل سرعة التشغيل (بمقدار 0.25x): Alt + السهم العلوي / السفلي",
-            "إعادة سرعة التشغيل للوضع الطبيعي (1.0x): Alt + Numpad 0",
-            "إضافة نقطة محفوظة (علامة مرجعية): Ctrl + B",
             "الانتقال إلى وقت محدد: Ctrl + G",
+            "",
+            "=== السرعة والعلامات المرجعية ===",
+            "زيادة / تقليل سرعة التشغيل (بمقدار 0.25x): Alt + السهم العلوي / السفلي",
+            "إعادة السرعة للوضع الطبيعي (1.0x): Alt + Numpad 0",
+            "إضافة علامة مرجعية عند الموضع الحالي: Ctrl + B",
             "تسمية أقرب علامة مرجعية: Ctrl + Alt + B",
-            "الانتقال للنقطة المحفوظة التالية: F2",
-            "الانتقال للنقطة المحفوظة السابقة: Shift + F2",
-            "حذف كل النقاط المحفوظة للملف الحالي: Ctrl + Shift + B",
+            "العلامة التالية: F2",
+            "العلامة السابقة: Shift + F2",
+            "حذف كل علامات الملف الحالي: Ctrl + Shift + B",
             "",
-            "=== إعلانات الوقت وإمكانية الوصول ===",
-            "إعلان الوقت الحالي والمتبقي والكامل معًا: حرف T",
-            "إعلان الوقت المتبقي فقط: حرف R",
-            "إعلان مدة الملف الكلية فقط: حرف E",
-            "تفعيل / تعطيل إعلانات النطق لقارئ الشاشة: Ctrl + Alt + A",
+            "=== إعلانات الوقت وقارئ الشاشة ===",
+            "الوقت الحالي والمتبقي والكامل معًا: حرف T",
+            "الوقت المتبقي فقط: حرف R",
+            "مدة الملف الكاملة فقط: حرف E",
+            "ما يُذاع الآن في الراديو: حرف N",
+            "إيقاف كل الإعلانات وإعادتها: Ctrl + Alt + A",
             "",
-            "=== التنقل في المجلد والعرض ===",
-            "الملف التالي في المجلد: Page Down",
-            "الملف السابق في المجلد: Page Up",
-            "تبديل وضع ملء الشاشة للفيديو: F11 أو Escape",
-            "",
-            "=== الروابط وقوائم التشغيل ===",
+            "=== الملفات والمجلدات وقوائم التشغيل ===",
+            "فتح ملف وسائط: Ctrl + O",
+            "فتح مجلد وسائط كامل: Ctrl + Shift + O",
             "فتح رابط (راديو أو بث مباشر أو ملف على الإنترنت): Ctrl + U",
-            "إعلان ما يُذاع الآن في الراديو: حرف N",
+            "الملف التالي في المجلد أو القائمة: Page Down",
+            "الملف السابق في المجلد أو القائمة: Page Up",
             "نافذة قائمة التشغيل (إضافة وحذف وترتيب): Ctrl + L",
             "حفظ قائمة التشغيل الحالية كملف M3U8: Ctrl + S",
             "داخل نافذة القائمة: Enter للتشغيل، Delete للحذف، Alt + السهم العلوي / السفلي للتحريك",
@@ -130,8 +143,13 @@ def _default_shortcuts_list(lang: str) -> list:
             "فتح نافذة المعادل الصوتي: Ctrl + E",
             "نمط المعادل التالي / السابق: حرف Q / Shift + Q",
             "",
-            "=== الأدوات والنوافذ العامة ===",
-            "فتح نافذة مسجل الصوت: Ctrl + Shift + R",
+            "=== مسجّل الصوت ===",
+            "فتح نافذة مسجّل الصوت: Ctrl + Shift + R",
+            "بدء التسجيل فورًا من النافذة الرئيسية أو نافذة المسجّل، ثم إيقافه وحفظه: Ctrl + R",
+            "سماع مستوى الصوت أثناء التسجيل (داخل نافذة المسجّل): Ctrl + L",
+            "شريط «مستوى المايكروفون» في نافذة المسجّل: الأسهم درجة واحدة، وPage Up / Page Down عشر درجات، ويعمل أثناء التسجيل أيضًا",
+            "",
+            "=== محرر الوسائط ===",
             "فتح نافذة محرر الوسائط: Ctrl + Shift + X",
             "",
             "=== الاختصارات الشبحية لمحرر الوسائط (تعمل من أي مكان) ===",
@@ -147,519 +165,550 @@ def _default_shortcuts_list(lang: str) -> list:
             "بدء العمل: Ctrl + Alt + Shift + Enter",
             "إلغاء العمل الجاري: Ctrl + Alt + Shift + C",
             "",
-            "بدء / إيقاف التسجيل الصوتي المباشر: Ctrl + R",
-            "إعلان مستوى الصوت أثناء التسجيل (داخل نافذة المسجّل): Ctrl + L",
-            "شريط «مستوى المايكروفون» في نافذة المسجّل: الأسهم درجة واحدة، وPage Up / Page Down عشر درجات، ويعمل أثناء التسجيل أيضًا",
-            "فتح نافذة محول الصيغ: من قائمة أدوات (Tools Menu)",
-            "فتح خيارات البرنامج والتفضيلات: Ctrl + Shift + P",
-            "التنقل بين تبويبات نافذة الخيارات: Ctrl + Tab، أو Ctrl + 1 إلى Ctrl + 5",
-            "فتح ملف وسائط جديد: Ctrl + O",
-            "فتح مجلد وسائط كامل: Ctrl + Shift + O",
+            "=== الخيارات والمساعدة ===",
+            "فتح الخيارات: Ctrl + Shift + P",
+            "التنقل بين تبويبات الخيارات: Ctrl + Tab، أو Ctrl + 1 إلى Ctrl + 6",
+            "فتح محول الصيغ: من قائمة «أدوات»",
+            "مؤقت النوم وتصدير الإعدادات واستيرادها: من قائمة «أدوات»",
+            "دليل الاستخدام: F1",
             "تصدير دليل الاختصارات كمستند نصي: Ctrl + Shift + H",
             "حفظ تقرير تشخيصي على سطح المكتب (بلا معلومات شخصية): Ctrl + Shift + D",
-            "الخروج الكامل من البرنامج: Ctrl + Q",
+            "الخروج من البرنامج: Ctrl + Q",
         ]
-    else:
+    return [
+        "=== Basic Playback ===",
+        "Play / Pause: Space",
+        "Stop and return to the start: Ctrl + Space",
+        "Mute / Unmute: M",
+        "Volume up / down (5%): Up / Down Arrow",
+        "Fast volume up / down (20%): Ctrl + Up / Down Arrow",
+        "Toggle video fullscreen: F11 or Escape",
+        "",
+        "=== Seeking ===",
+        "Seek 10 Seconds: Right / Left Arrow",
+        "Seek 1 Minute (60s): Ctrl + Right / Left Arrow",
+        "Seek 5 Minutes: Shift + Right / Left Arrow",
+        "Seek 10 Minutes: Alt + Right / Left Arrow",
+        "Seek 30 Minutes: Ctrl + Shift + Right / Left Arrow",
+        "Jump to a percentage of the file (10% to 90%): Numpad 1 to 9",
+        "Jump to the start of the file: Numpad 0 or Home",
+        "Jump to the end of the file (last 5 seconds): End",
+        "Go to a specific time: Ctrl + G",
+        "",
+        "=== Speed & Bookmarks ===",
+        "Increase / decrease speed (by 0.25x): Alt + Up / Down Arrow",
+        "Reset speed (1.0x): Alt + Numpad 0",
+        "Add a bookmark at the current position: Ctrl + B",
+        "Name the nearest bookmark: Ctrl + Alt + B",
+        "Next bookmark: F2",
+        "Previous bookmark: Shift + F2",
+        "Clear all bookmarks of the current file: Ctrl + Shift + B",
+        "",
+        "=== Time & Screen Reader Announcements ===",
+        "Current, remaining and total time together: T",
+        "Remaining time only: R",
+        "Total duration only: E",
+        "Radio now playing: N",
+        "Turn all announcements off and on: Ctrl + Alt + A",
+        "",
+        "=== Files, Folders & Playlists ===",
+        "Open a media file: Ctrl + O",
+        "Open a whole media folder: Ctrl + Shift + O",
+        "Open a link (radio, live stream or online file): Ctrl + U",
+        "Next file in the folder or playlist: Page Down",
+        "Previous file in the folder or playlist: Page Up",
+        "Playlist window (add, remove, reorder): Ctrl + L",
+        "Save the current playlist as M3U8: Ctrl + S",
+        "Inside the Playlist window: Enter plays, Delete removes, Alt + Up / Down Arrow moves",
+        "",
+        "=== Equalizer ===",
+        "Open the Equalizer window: Ctrl + E",
+        "Next / previous equalizer preset: Q / Shift + Q",
+        "",
+        "=== Audio Recorder ===",
+        "Open the Audio Recorder window: Ctrl + Shift + R",
+        "Start recording right away from the main or Recorder window, then stop and save: Ctrl + R",
+        "Hear the level while recording (inside the Recorder window): Ctrl + L",
+        "Microphone level slider in the Recorder window: arrows move one step, Page Up / Page Down ten steps; works while recording too",
+        "",
+        "=== Media Editor ===",
+        "Open the Media Editor window: Ctrl + Shift + X",
+        "",
+        "=== Media Editor Ghost Shortcuts (work from anywhere) ===",
+        "Turn ghost shortcuts on or off: Ctrl + Alt + Shift + G",
+        "Open the Media Editor: Ctrl + Alt + Shift + O",
+        "Set the split point at the current position: Ctrl + Alt + Shift + S",
+        "Set a part start at the current position: Ctrl + Alt + Shift + B",
+        "Set the part end and add the part: Ctrl + Alt + Shift + E",
+        "Undo the last part or start: Ctrl + Alt + Shift + Z",
+        "Add the current file to the “Split several files” list: Ctrl + Alt + Shift + L",
+        "Add the current file to the merge list: Ctrl + Alt + Shift + M",
+        "Announce what is set in the editor: Ctrl + Alt + Shift + I",
+        "Start the work: Ctrl + Alt + Shift + Enter",
+        "Cancel the running work: Ctrl + Alt + Shift + C",
+        "",
+        "=== Options & Help ===",
+        "Open Options: Ctrl + Shift + P",
+        "Switch Options tabs: Ctrl + Tab, or Ctrl + 1 to Ctrl + 6",
+        "Open the Format Converter: from the Tools menu",
+        "Sleep timer, export and import settings: from the Tools menu",
+        "User guide: F1",
+        "Export the shortcuts guide as text: Ctrl + Shift + H",
+        "Save a diagnostic report to the Desktop (no personal data): Ctrl + Shift + D",
+        "Exit the program: Ctrl + Q",
+    ]
+
+
+def _k(keys):
+    """
+    مفاتيح داخل النص: كل مفتاح في <kbd> والعلامة + بينها.
+
+    الاختصار كله من اليسار لليمين: في الصفحة العربية كانت المفاتيح تُرتَّب
+    من اليمين فيظهر Ctrl+Shift+X كأنه X+Shift+Ctrl.
+    """
+    joined = "+".join(f"<kbd>{escape(part.strip())}</kbd>" for part in keys.split("+"))
+    return f'<span class="combo" dir="ltr">{joined}</span>'
+
+
+def _sections(lang, steps):
+    """
+    أقسام الدليل: (معرّف، عنوان، [نقاط]). النقطة نص HTML، وقد تبدأ بعنوان
+    فرعي بين <b>.
+
+    steps: مقادير التقديم الحالية بالثواني، ليطابق الدليل ما ضبطه المستخدم.
+    """
+    amount = {kind: _amount_text(lang, seconds) for kind, seconds in steps.items()}
+    k = _k
+
+    if lang == "ar":
         return [
-            "=== Basic Playback & Controls ===",
-            "Play / Pause: Space",
-            "Full Stop & Rewind to Start: Ctrl + Space",
-            "Mute / Unmute: M",
-            "Volume Up / Down (5%): Up / Down Arrow",
-            "Quick Volume Up / Down (20%): Ctrl + Up / Down Arrow",
-            "",
-            "=== Adaptive Seeking ===",
-            "Seek 10 Seconds: Right / Left Arrow",
-            "Seek 1 Minute (60s): Ctrl + Right / Left Arrow",
-            "Seek 5 Minutes: Shift + Right / Left Arrow",
-            "Seek 10 Minutes: Alt + Right / Left Arrow",
-            "Seek 30 Minutes: Ctrl + Shift + Right / Left Arrow",
-            "Jump to Duration Percentage (10% - 90%): Numpad 1 to 9",
-            "Jump to Start of File: Numpad 0 or Home",
-            "Jump to End of File (last 5s): End",
-            "Set the smallest jump that announces the position (1, 5, 10 or 30 minutes): Options, Accessibility tab",
-            "",
-            "=== Speed Control & Bookmarks ===",
-            "Increase / Decrease Speed (by 0.25x): Alt + Up / Down Arrow",
-            "Reset Playback Speed (1.0x): Alt + Numpad 0",
-            "Add Bookmark: Ctrl + B",
-            "Go to a specific time: Ctrl + G",
-            "Name the nearest bookmark: Ctrl + Alt + B",
-            "Next Bookmark: F2",
-            "Previous Bookmark: Shift + F2",
-            "Clear Bookmarks for Current File: Ctrl + Shift + B",
-            "",
-            "=== Time Announcements & Accessibility ===",
-            "Announce Time Status (Current, Remaining, Total): T",
-            "Announce Remaining Time Only: R",
-            "Announce Total Duration Only: E",
-            "Toggle Screen Reader Speech Announcements: Ctrl + Alt + A",
-            "",
-            "=== Folder Navigation & Display ===",
-            "Next File in Folder: Page Down",
-            "Previous File in Folder: Page Up",
-            "Toggle Video Fullscreen: F11 or Escape",
-            "",
-            "=== Links & Playlists ===",
-            "Open URL (radio, live stream, or online file): Ctrl + U",
-            "Announce radio now-playing: N",
-            "Playlist window (add, remove, reorder): Ctrl + L",
-            "Save the current playlist as M3U8: Ctrl + S",
-            "Inside the Playlist window: Enter plays, Delete removes, Alt + Up / Down Arrow moves",
-            "",
-            "=== Equalizer ===",
-            "Open the Equalizer window: Ctrl + E",
-            "Next / Previous equalizer preset: Q / Shift + Q",
-            "",
-            "=== Tools & Windows ===",
-            "Open Audio Recorder Window: Ctrl + Shift + R",
-            "Open Media Editor Window: Ctrl + Shift + X",
-            "",
-            "=== Media Editor Ghost Shortcuts (work from anywhere) ===",
-            "Turn ghost shortcuts on or off: Ctrl + Alt + Shift + G",
-            "Open the Media Editor: Ctrl + Alt + Shift + O",
-            "Set the split point at the current position: Ctrl + Alt + Shift + S",
-            "Set a part start at the current position: Ctrl + Alt + Shift + B",
-            "Set the part end and add the part: Ctrl + Alt + Shift + E",
-            "Undo the last part or start: Ctrl + Alt + Shift + Z",
-            "Add the current file to the “Split several files” list: Ctrl + Alt + Shift + L",
-            "Add the current file to the merge list: Ctrl + Alt + Shift + M",
-            "Announce what is set in the editor: Ctrl + Alt + Shift + I",
-            "Start the work: Ctrl + Alt + Shift + Enter",
-            "Cancel the running work: Ctrl + Alt + Shift + C",
-            "",
-            "Start / Stop Quick Recording Immediately: Ctrl + R",
-            "Open Format Converter Window: From Tools Menu",
-            "Open Program Options: Ctrl + Shift + P",
-            "Open Media File: Ctrl + O",
-            "Open Media Folder: Ctrl + Shift + O",
-            "Export Shortcuts Guide as Text: Ctrl + Shift + H",
-            "Announce recording level (inside the Recorder window): Ctrl + L",
-            "Microphone level slider in the Recorder window: arrows move one step, Page Up / Page Down ten steps; works while recording too",
-            "Switch Options tabs: Ctrl + Tab, or Ctrl + 1 to Ctrl + 5",
-            "Save a diagnostic report to the Desktop (no personal data): Ctrl + Shift + D",
-            "Exit Application: Ctrl + Q",
+            ("new", "ما الجديد في الإصدار " + APP_VERSION, [
+                f"<b>محرر الوسائط:</b> قص الصوت والفيديو ودمجهما داخل البرنامج، مع اختصارات «شبحية» تعمل وأنت تسمع في المشغّل ({k('Ctrl+Shift+X')}).",
+                f"<b>الراديو والبث المباشر:</b> افتح أي رابط بـ {k('Ctrl+U')}، ويُعلَن اسم ما يُذاع الآن كلما تغيّر.",
+                f"<b>قوائم تشغيل محفوظة:</b> ابنِ قائمتك ورتّبها بـ {k('Ctrl+L')} واحفظها بـ {k('Ctrl+S')}.",
+                f"<b>المعادل الصوتي:</b> 18 نمطًا جاهزًا تتنقل بينها بـ {k('Q')}، وعشرة نطاقات تضبطها بنفسك ({k('Ctrl+E')}).",
+                "<b>مسجّل أنقى:</b> شريط لمستوى المايكروفون داخل المسجّل، وتقليل ضوضاء يعمل فعلًا مع أي مايكروفون، ووضع حصري يعمل مع مايكروفونات USB، ودمج المايكروفون وصوت الجهاز بلا انقطاع.",
+                "<b>محول أذكى:</b> «أعلى جودة» لا يضخّم الملف بلا فائدة، والصيغ التي كانت تفشل بمعدلات عيّنة عالية صارت تنجح.",
+                "<b>مظهر داكن حقيقي</b> للبرنامج كله، وواجهة عربية من اليمين إلى اليسار.",
+                "<b>مقادير تقديم تختارها بنفسك</b> لكل مفتاح مساعد، ومجلدات حفظ ثابتة ومرتبة في المستندات.",
+            ]),
+            ("start", "البداية", [
+                f"<b>فتح الملفات:</b> {k('Ctrl+O')} لملف، و{k('Ctrl+Shift+O')} لمجلد كامل، و{k('Ctrl+U')} لرابط. وقائمة «ملف» فيها «الملفات الأخيرة».",
+                "<b>من مستكشف ويندوز:</b> انقر بزر الفأرة الأيمن على ملف صوت أو فيديو فتجد «تشغيل» و«تحويل» بالبرنامج، وعلى مجلد فتجد «تحويل» لكل ما فيه. ويظهر البرنامج كذلك في «فتح باستخدام».",
+                "<b>الاستئناف:</b> يتذكر البرنامج أين توقفت في كل ملف، ويكمل من عنده عند فتحه مرة أخرى، ويتذكر سرعة التشغيل لكل ملف على حدة.",
+                "<b>التنقل في المجلد:</b> فتح ملف يُحضر بقية ملفات مجلده، فتنتقل بينها بـ " + k("Page Down") + " و" + k("Page Up") + ". ومن الخيارات تختار ما يحدث عند انتهاء الملف: لا شيء، أو الانتقال إلى التالي.",
+                "<b>مفاتيح الوسائط:</b> أزرار التشغيل والإيقاف والتالي والسابق في لوحة المفاتيح تعمل مع البرنامج حتى وهو في الخلفية، ويمكن إطفاؤها من الخيارات.",
+            ]),
+            ("playback", "التشغيل والتنقل داخل الملف", [
+                f"<b>التشغيل:</b> {k('Space')} للتشغيل والإيقاف المؤقت، و{k('Ctrl+Space')} للإيقاف والعودة إلى البداية، و{k('M')} للكتم.",
+                f"<b>الصوت:</b> الأسهم لأعلى ولأسفل بخطوة 5%، ومع {k('Ctrl')} بخطوة 20%.",
+                f"<b>التقديم والإرجاع:</b> الأسهم يمينًا ويسارًا بـ {amount['normal']}، ومع {k('Ctrl')} بـ {amount['ctrl']}، ومع {k('Shift')} بـ {amount['shift']}، ومع {k('Alt')} بـ {amount['alt']}، ومع {k('Ctrl+Shift')} بـ {amount['ctrl_shift']}. كل مقدار منها تغيّره من الخيارات، تبويب «التشغيل والتنقل».",
+                f"<b>القفز المباشر:</b> أرقام لوحة الأرقام من 1 إلى 9 تقفز إلى 10% حتى 90% من الملف، و{k('Numpad 0')} أو {k('Home')} إلى البداية، و{k('End')} إلى آخر خمس ثوانٍ.",
+                f"<b>الذهاب إلى وقت محدد:</b> {k('Ctrl+G')} ثم اكتب الوقت: <code>90</code> أو <code>1:30</code> أو <code>1:02:03</code>. إن كان بعد نهاية الملف يخبرك بدل أن ينتقل إلى مكان خاطئ.",
+                f"<b>السرعة:</b> {k('Alt')} مع السهم لأعلى أو لأسفل يغيّرها بمقدار 0.25×، و{k('Alt+Numpad 0')} يعيدها طبيعية، دون أن تتغير نبرة الصوت.",
+                f"<b>ملء الشاشة:</b> {k('F11')} للفيديو، و{k('Escape')} للخروج منه.",
+            ]),
+            ("announce", "الإعلانات الصوتية والوقت", [
+                f"<b>الوقت عند الطلب:</b> {k('T')} للوقت الحالي والمتبقي والكامل معًا، و{k('R')} للمتبقي فقط، و{k('E')} لمدة الملف كاملة.",
+                f"<b>المفتاح الرئيسي:</b> {k('Ctrl+Alt+A')} يوقف كل إعلانات البرنامج فورًا ويعيدها.",
+                "<b>إعلان لكل شيء على حدة:</b> تبويب «إمكانية الوصول» في الخيارات فيه صندوق اختيار لكل إعلان: اسم الملف وترتيبه في القائمة، والاستئناف، وحالة التشغيل، والصوت والكتم، والسرعة، والعلامات، ومؤقت النوم، ونمط المعادل، وما يُذاع في الراديو، وغيرها. فعّل ما ينفعك وأسكت الباقي.",
+                "<b>إعلانات التقديم بلا ثرثرة:</b> اختر أصغر قفزة يُعلَن عندها الموضع الجديد (كل القفزات، أو من دقيقة أو 5 أو 10 أو 30 دقيقة فأكثر). أرقام لوحة الأرقام والذهاب إلى وقت محدد تُعلَن دائمًا.",
+                "<b>معلومات الملف:</b> يمكن أن يعلن البرنامج صيغة الملف وجودته ومدته عند فتحه، وحالة التحميل إن احتاج الملف وقتًا.",
+            ]),
+            ("bookmarks", "العلامات المرجعية", [
+                f"<b>ضع علامة</b> عند أي موضع بـ {k('Ctrl+B')}، وتنقّل بين العلامات بـ {k('F2')} و{k('Shift+F2')}، واحذف علامات الملف كلها بـ {k('Ctrl+Shift+B')}.",
+                f"<b>سمِّ العلامة</b> بـ {k('Ctrl+Alt+B')}، فتسمع «بداية الفصل الثالث» بدل «علامة عند 12 دقيقة». اترك الاسم فارغًا لإزالته.",
+                "<b>العلامات أداة للمحرر أيضًا:</b> في محرر الوسائط تختار الأوقات «من العلامات» بدل كتابتها، وانظر قسم المحرر.",
+            ]),
+            ("streams", "الراديو والروابط وقوائم التشغيل", [
+                f"<b>الروابط:</b> {k('Ctrl+U')} يفتح خانة الرابط، وإن كنت نسخت رابطًا تجده مكتوبًا فيها. يشغّل الراديو والبث المباشر والملفات على الإنترنت، ويعيد الاتصال وحده إن انقطع البث.",
+                f"<b>ما يُذاع الآن:</b> في المحطات التي ترسل اسم الأغنية أو البرنامج يُعلَن الاسم كلما تغيّر، و{k('N')} يعيده متى شئت.",
+                f"<b>قائمة التشغيل:</b> {k('Ctrl+L')} يفتح القائمة الحالية: أضف ملفات أو مجلدات أو روابط محطات، واحذف بـ {k('Delete')}، ورتّب بـ {k('Alt')} مع الأسهم، وشغّل بـ {k('Enter')}.",
+                f"<b>حفظ القوائم:</b> {k('Ctrl+S')} يحفظها بصيغة M3U8 التي تفتحها معظم المشغلات. إن كانت الملفات داخل مجلد القائمة تبقى صالحة لو نقلت المجلد كله. وأي قائمة M3U أو M3U8 أو PLS تُفتح مثل أي ملف بـ {k('Ctrl+O')}.",
+            ]),
+            ("eq", "المعادل الصوتي", [
+                f"<b>الأنماط الجاهزة:</b> {k('Q')} و{k('Shift+Q')} يتنقلان بين 18 نمطًا (منها «سماعات الرأس» و«جهير كامل» و«قاعة كبيرة») ويُنطق اسم كل نمط.",
+                f"<b>الضبط اليدوي:</b> {k('Ctrl+E')} يفتح نافذة فيها التضخيم المسبق وعشرة نطاقات تعدّلها بالأسهم وتسمع النتيجة فورًا. تعديل أي نطاق يجعل النمط «مخصص»، و«إلغاء» يعيد ما كان قبل فتح النافذة.",
+                "<b>يبقى محفوظًا:</b> اختيارك يسري على كل الملفات ويبقى بعد إغلاق البرنامج.",
+            ]),
+            ("recorder", "مسجّل الصوت", [
+                f"<b>الفتح والتسجيل السريع:</b> {k('Ctrl+Shift+R')} يفتح نافذة المسجّل. و{k('Ctrl+R')} من النافذة الرئيسية أو نافذة المسجّل يبدأ التسجيل فورًا بآخر إعداداتك، والضغطة الثانية توقفه وتحفظه. إن أغلقت النافذة والتسجيل جارٍ تختفي ويستمر التسجيل في الخلفية.",
+                "<b>قائمة أجهزة نظيفة:</b> كل مايكروفون يظهر مرة واحدة باسم مفهوم، ويختار له البرنامج أفضل طريقة اتصال وإعداداته المناسبة، ولكل جهاز إعداداته المحفوظة على حدة.",
+                f"<b>مستوى المايكروفون:</b> شريط «مستوى المايكروفون» تحت اختيار الجهاز هو نفسه مستوى المايكروفون في إعدادات الصوت في ويندوز. التشوّه يحدث داخل المايكروفون قبل أن يصل الصوت للبرنامج، فخفض هذا المستوى هو العلاج الحقيقي. حرّكه بالأسهم درجة درجة، أو بـ {k('Page Up')} و{k('Page Down')} عشر درجات، ويمكنك تغييره أثناء التسجيل. ابدأ من نحو 70%. وإن كان الجهاز لا يسمح بالتحكم في مستواه يتعطل الشريط ويظهر تحته السبب.",
+                "<b>اختبار المايكروفون:</b> زر يسجّل عشر ثوانٍ ثم يخبرك نصًّا يقرؤه قارئ الشاشة: هل المستوى جيد أم مرتفع أم منخفض أم لا يصل صوت أصلًا، ومعه خطوات الإصلاح.",
+                f"<b>المستوى أثناء التسجيل:</b> {k('Ctrl+L')} ينطق المستوى الحالي وأعلى قمة، وعند الطلب فقط حتى لا يتسجّل صوت قارئ الشاشة في الملف. وإن ارتفع المستوى حتى التشوّه يظهر تنبيه في النافذة، ويخبرك البرنامج عند الحفظ بعدد المواضع المتأثرة.",
+                "<b>تحسين صوت المايكروفون:</b> «بلا معالجة» يحفظ الصوت كما خرج من كرت الصوت. «تنقية» تزيل الطنين المنخفض (اهتزاز المكتب ومروحة الجهاز ولمس المايكروفون) وتمنع قص القمم دون أن تمس الكلام. «تنقية وتقليل الضوضاء الثابتة» تخفض معها الوشيش والتكييف والمروحة وطنين الكهرباء: يقيس البرنامج ضوضاء مايكروفونك وغرفتك بنفسه أثناء التسجيل، فيخفضها نحو أربع مرات في سكتات الكلام دون أن يصير الصوت معدنيًا. التحسين للمايكروفون وحده، ولا يمس صوت الجهاز.",
+                "<b>الوضع الحصري (وصول مباشر لكرت الصوت):</b> يأخذ البرنامج الصوت من الكرت مباشرة دون معالجة ويندوز، فلا تحسينات خفية ولا خلط مع برامج أخرى، لكن لا يستعمل برنامج آخر المايكروفون أثناء التسجيل. بعض المايكروفونات لا تقبله إلا بدقتها الأصلية (192000 مثلًا)، فيلتقط البرنامج بها ويحوّل الصوت إلى الدقة التي اخترتها، ويبقى الملف بحجمه المعتاد. وإن رفض الكرت الوضع الحصري تمامًا يخبرك البرنامج ويسجّل بالوضع العادي.",
+                "<b>صوتك مع صوت الجهاز:</b> فعّل «دمج جهاز إدخال ثانٍ» فيختار البرنامج صوت النظام (الستيريو ميكس) تلقائيًا. يُدمج المصدران عيّنة بعيّنة ويوازن البرنامج مستواهما، فلا يضيع صوتك تحت الموسيقى ولا تحدث انقطاعات.",
+                "<b>الجودة والصيغة:</b> معدل العيّنة (48000 كافية لكل ما تسمعه الأذن)، وأحادي أو ستيريو، وعمق 16 أو 24 أو 32 بت، والصيغة: WAV بلا ضغط، أو MP3 وM4A وغيرهما ملفات أصغر بكثير تُكتب مباشرة أثناء التسجيل. «معدل البت» يبدأ عند «أعلى جودة متاحة» ويعرف سقف كل صيغة.",
+            ]),
+            ("editor", "محرر الوسائط", [
+                f"<b>أربع عمليات</b> من قائمة «أدوات» أو {k('Ctrl+Shift+X')}: «قص ملف» إلى جزأين، و«قص عدة ملفات» عند الوقت نفسه دفعة واحدة، و«مقاطع من ملف» تُضم بالترتيب في ملف واحد، و«دمج ملفات» بالترتيب الذي تختاره.",
+                "<b>بلا فقد في الجودة:</b> الناتج بصيغة الأصل نفسها، والصوت يُنسخ كما هو دون إعادة ترميز. ملفات الصوت المختلفة الصيغ تُدمج بإعادة ترميزها، أما ملفات الفيديو المدموجة فيجب أن تتطابق في الصيغة والمقاس، وإلا يخبرك المحرر بالسبب.",
+                "<b>طريقتان للفيديو:</b> «سريع بنفس الجودة» يبدأ القص من أقرب إطار مفتاحي (صورة كاملة كل بضع ثوانٍ) ويخبرك أين قص بالضبط، و«دقيق بالثانية» يقص عند الوقت المطلوب لكنه أبطأ.",
+                "<b>الأوقات بلا كتابة:</b> زر «الموضع الحالي» يأخذ الوقت من المشغّل وأنت تسمع. أو ضع علامة بـ " + k("Ctrl+B") + " عند كل موضع، ثم اختر الوقت «من العلامات»، أو اضغط «مقاطع من العلامات» فتصير كل علامتين متتاليتين بداية مقطع ونهايته. وتقبل خانة الوقت أجزاء الثانية مثل <code>1:30.5</code>.",
+                f"<b>الاختصارات الشبحية:</b> تعمل من أي مكان والمشغّل في المقدمة أو الخلفية: حدد نقطة القص وبداية المقطع ونهايته، وأضف الملف الحالي إلى قوائم القص والدمج، واسمع ما حُدِّد، وابدأ العمل أو ألغِه، دون أن تفتح نافذة المحرر. تشغيلها وإيقافها بـ {k('Ctrl+Alt+Shift+G')} أو من قائمة «أدوات»، وكلها في آخر هذا الدليل. وإغلاق المحرر يخفيه فقط، فلا يضيع ما حددته.",
+                "<b>إعدادات المحرر:</b> تبويب «محرر الوسائط» في الخيارات: طريقة قص الفيديو الافتراضية، وإعلان التقدم كل كم بالمئة، وتغيير أي اختصار شبحي (ويرفض البرنامج الاختصار المكرر).",
+            ]),
+            ("converter", "محول الصيغ", [
+                "<b>الفتح:</b> من قائمة «أدوات»، أو بزر الفأرة الأيمن على ملف أو مجلد في مستكشف ويندوز. يحوّل ملفًا أو مجلدًا كاملًا دفعة واحدة، ويعلن تقدم كل ملف ونتيجته.",
+                "<b>معلومات المصدر الحقيقية:</b> الترميز والدقة ومعدل البت الفعلي ومعدل العيّنة والقنوات، لتعرف ما تحوّله قبل أن تبدأ.",
+                "<b>أعلى جودة بذكاء:</b> «أعلى جودة متاحة» تعرف سقف كل صيغة (320 كيلوبت لـ MP3، و640 لـ AC3، و256 لـ Opus أحادي)، ولا تتجاوز جودة المصدر المضغوط فلا يكبر الملف بلا فائدة. وإن اخترت رقمًا فوق ما تحتمله الصيغة نزل البرنامج إلى أقصاها بدل أن يفشل التحويل، وكذلك معدلات العيّنة غير المدعومة.",
+                "<b>إعدادات متقدمة:</b> للصوت معدل العيّنة والقنوات، وللفيديو جودة ثابتة (CRF) أو معدل بت ثابت، والدقة ومعدل الإطارات. وقيمها الافتراضية في تبويب «المحول» في الخيارات.",
+            ]),
+            ("folders", "أين تُحفظ ملفاتك", [
+                "في «المستندات» مجلد باسم البرنامج، وفيه: «التسجيلات» و«الملفات المحولة» و«محرر الوسائط» بداخله «صوت» و«فيديو».",
+                "تُسمّى المجلدات مرة واحدة بلغة البرنامج عند أول تشغيل ولا تتغير بعد ذلك، وإن كان الاسم مأخوذًا يُضاف إليه رقم. ومجلدات الإصدارات السابقة تُضم إليها تلقائيًا.",
+                "عند حفظ تسجيل يخبرك البرنامج بمدته والمكان الذي حُفظ فيه.",
+            ]),
+            ("options", "الخيارات والتخصيص", [
+                f"<b>الخيارات</b> بـ {k('Ctrl+Shift+P')}، وفيها ستة تبويبات تتنقل بينها بـ {k('Ctrl+Tab')} أو {k('Ctrl+1')} إلى {k('Ctrl+6')}: «عام» و«التشغيل والتنقل» و«إمكانية الوصول» و«المحول» و«المسجّل» و«محرر الوسائط».",
+                "<b>المظهر:</b> «يتبع ويندوز» أو «فاتح» أو «داكن». الداكن يشمل القوائم وشريط العنوان والنوافذ كلها، ويسري بعد إعادة فتح البرنامج. وفي وضع التباين العالي يستعمل البرنامج ألوان ويندوز دائمًا.",
+                "<b>اللغة:</b> العربية بواجهة من اليمين إلى اليسار، أو الإنجليزية. تسري بعد إعادة التشغيل.",
+                "<b>أشياء أخرى في «عام»:</b> عدد الملفات الأخيرة، ونغمة هادئة عند انتهاء التحويل أو التسجيل، ومفاتيح الوسائط، وزرّا «البرامج الافتراضية» و«خصوصية المايكروفون» في ويندوز.",
+                "<b>مؤقت النوم:</b> من قائمة «أدوات»: يوقف التشغيل بعد عدد من الدقائق، أو عند نهاية الملف الحالي. اختر صفرًا لإلغائه.",
+                "<b>نقل إعداداتك:</b> «تصدير الإعدادات» و«استيراد الإعدادات» من قائمة «أدوات»، لجهاز جديد أو نسخة احتياطية.",
+                "<b>النافذة كما تركتها:</b> حجمها وموضعها يُحفظان بين المرات.",
+            ]),
+            ("help", "عند مواجهة مشكلة", [
+                f"<b>تقرير تشخيصي:</b> {k('Ctrl+Shift+D')} يحفظ على سطح المكتب ملفًا نصيًا فيه معلومات النظام وسجل البرنامج، و<b>بلا أي معلومات شخصية</b>: لا اسم جهازك ولا اسم المستخدم ولا مسارات ملفاتك، فيمكنك نشره في مجموعة عامة دون قلق.",
+                "<b>تفاصيل اختبار المايكروفون:</b> في نتيجة الاختبار زر «نسخ التفاصيل التقنية» ينسخ سطرًا واحدًا خاليًا من أي بيانات تعرّفك، جاهزًا للصق في رسالة الدعم.",
+                "<b>المايكروفون لا يصل صوته:</b> تأكد من السماح للتطبيقات باستعمال المايكروفون، وزر «خصوصية المايكروفون» في تبويب «عام» يفتح الإعداد مباشرة. وإن كان برنامج آخر يمسك المايكروفون في الوضع الحصري أغلقه وحاول مرة أخرى.",
+            ]),
+            ("license", "الترخيص", [
+                "البرنامج حر تحت رخصة GNU GPL الإصدار الثالث: لك أن تستعمله وتنسخه وتعدّله وتوزّعه بشروطها، وهو بلا أي ضمان.",
+                "نص الرخصة وتراخيص المكتبات المضمَّنة في ملفي LICENSE وTHIRD-PARTY.md ومجلد licenses بجانب البرنامج.",
+            ]),
         ]
+
+    return [
+        ("new", "What's New in Version " + APP_VERSION, [
+            f"<b>Media Editor:</b> cut and merge audio and video inside the program, with “ghost” shortcuts that work while you listen in the player ({k('Ctrl+Shift+X')}).",
+            f"<b>Radio and live streams:</b> open any link with {k('Ctrl+U')}, and what is playing now is announced whenever it changes.",
+            f"<b>Saved playlists:</b> build and reorder your list with {k('Ctrl+L')} and save it with {k('Ctrl+S')}.",
+            f"<b>Equalizer:</b> 18 presets you cycle with {k('Q')}, and ten bands you adjust yourself ({k('Ctrl+E')}).",
+            "<b>Cleaner recordings:</b> a microphone level slider inside the recorder, noise reduction that really works with any microphone, exclusive mode that works with USB microphones, and microphone plus system audio mixed without dropouts.",
+            "<b>Smarter converter:</b> “Highest quality” no longer inflates files for nothing, and formats that failed at high sample rates now succeed.",
+            "<b>A real dark mode</b> for the whole program, and a right-to-left Arabic interface.",
+            "<b>Seek amounts you choose</b> for each modifier key, and fixed, tidy output folders in Documents.",
+        ]),
+        ("start", "Getting Started", [
+            f"<b>Opening files:</b> {k('Ctrl+O')} for a file, {k('Ctrl+Shift+O')} for a whole folder, {k('Ctrl+U')} for a link. The File menu has “Recent Files”.",
+            "<b>From Windows Explorer:</b> right-click an audio or video file for “Play” and “Convert” with the program, or a folder to convert everything in it. The program also appears in “Open with”.",
+            "<b>Resume:</b> the program remembers where you stopped in each file and continues from there when you open it again, and it remembers the playback speed of each file separately.",
+            "<b>Folder navigation:</b> opening a file brings in the rest of its folder, so you move between them with " + k("Page Down") + " and " + k("Page Up") + ". In Options you choose what happens when a file ends: nothing, or go to the next one.",
+            "<b>Media keys:</b> the play, stop, next and previous keys on your keyboard work with the program even in the background; you can turn this off in Options.",
+        ]),
+        ("playback", "Playback and Moving Within a File", [
+            f"<b>Playback:</b> {k('Space')} plays and pauses, {k('Ctrl+Space')} stops and returns to the start, {k('M')} mutes.",
+            f"<b>Volume:</b> Up and Down Arrow in 5% steps, with {k('Ctrl')} in 20% steps.",
+            f"<b>Seeking:</b> Right and Left Arrow by {amount['normal']}, with {k('Ctrl')} by {amount['ctrl']}, with {k('Shift')} by {amount['shift']}, with {k('Alt')} by {amount['alt']}, with {k('Ctrl+Shift')} by {amount['ctrl_shift']}. Each amount can be changed in Options, “Playback & Navigation” tab.",
+            f"<b>Direct jumps:</b> Numpad 1 to 9 jump to 10% through 90% of the file, {k('Numpad 0')} or {k('Home')} to the start, {k('End')} to the last five seconds.",
+            f"<b>Go to a time:</b> {k('Ctrl+G')}, then type the time: <code>90</code>, <code>1:30</code> or <code>1:02:03</code>. If it is past the end of the file you are told instead of being taken to the wrong place.",
+            f"<b>Speed:</b> {k('Alt')} with Up or Down Arrow changes it by 0.25×, and {k('Alt+Numpad 0')} resets it, without changing the pitch.",
+            f"<b>Fullscreen:</b> {k('F11')} for video, {k('Escape')} to leave it.",
+        ]),
+        ("announce", "Spoken Announcements and Time", [
+            f"<b>Time on demand:</b> {k('T')} for current, remaining and total time together, {k('R')} for remaining only, {k('E')} for the full duration.",
+            f"<b>Master switch:</b> {k('Ctrl+Alt+A')} silences all of the program's announcements at once and brings them back.",
+            "<b>One setting per announcement:</b> the Accessibility tab in Options has a checkbox for each announcement: file name and playlist position, resume, playback state, volume and mute, speed, bookmarks, sleep timer, equalizer preset, radio now playing and more. Keep what helps you and silence the rest.",
+            "<b>Seeking without chatter:</b> choose the smallest jump whose new position is announced (every jump, or from 1, 5, 10 or 30 minutes up). Numpad jumps and Go to time are always announced.",
+            "<b>File information:</b> the program can announce a file's format, quality and duration when it opens, and the loading state if a file takes time.",
+        ]),
+        ("bookmarks", "Bookmarks", [
+            f"<b>Add a bookmark</b> anywhere with {k('Ctrl+B')}, move between bookmarks with {k('F2')} and {k('Shift+F2')}, and clear a file's bookmarks with {k('Ctrl+Shift+B')}.",
+            f"<b>Name a bookmark</b> with {k('Ctrl+Alt+B')}, so you hear “Start of chapter three” instead of “Bookmark at 12 minutes”. Leave the name empty to remove it.",
+            "<b>Bookmarks also drive the editor:</b> in the Media Editor you pick times “From Bookmarks” instead of typing them; see the editor section.",
+        ]),
+        ("streams", "Radio, Links and Playlists", [
+            f"<b>Links:</b> {k('Ctrl+U')} opens the link box, already filled in if you copied a link. It plays radio, live streams and online files, and reconnects by itself if the stream drops.",
+            f"<b>Now playing:</b> on stations that send the song or show name, it is announced whenever it changes, and {k('N')} repeats it any time.",
+            f"<b>Playlist:</b> {k('Ctrl+L')} opens the current list: add files, folders or station links, remove with {k('Delete')}, reorder with {k('Alt')} and the arrows, play with {k('Enter')}.",
+            f"<b>Saving playlists:</b> {k('Ctrl+S')} saves as M3U8, which most players open. If the files are inside the playlist's folder, the list keeps working when you move the whole folder. Any M3U, M3U8 or PLS list opens like a file with {k('Ctrl+O')}.",
+        ]),
+        ("eq", "Equalizer", [
+            f"<b>Presets:</b> {k('Q')} and {k('Shift+Q')} cycle 18 presets (including “Headphones”, “Full Bass” and “Large Hall”) and speak each name.",
+            f"<b>Manual adjustment:</b> {k('Ctrl+E')} opens a window with preamp and ten bands you adjust with the arrows and hear immediately. Changing any band makes the preset “Custom”, and “Cancel” restores what you had before opening the window.",
+            "<b>It stays:</b> your choice applies to every file and is kept after closing the program.",
+        ]),
+        ("recorder", "Audio Recorder", [
+            f"<b>Opening and quick recording:</b> {k('Ctrl+Shift+R')} opens the recorder. {k('Ctrl+R')} from the main or Recorder window starts recording right away with your last settings, and pressing it again stops and saves. If you close the window while recording, it hides and the recording continues in the background.",
+            "<b>A clean device list:</b> each microphone appears once with a readable name; the program picks the best connection and settings for it, and each device keeps its own saved settings.",
+            f"<b>Microphone level:</b> the “Microphone level” slider under the device choice is the same microphone level as in Windows sound settings. Distortion happens inside the microphone before the sound reaches the program, so lowering this level is the real cure. Move it one step with the arrows, or ten with {k('Page Up')} and {k('Page Down')}; you can change it while recording. Start around 70%. If a device doesn't allow its level to be changed, the slider is disabled and the reason is shown under it.",
+            "<b>Microphone test:</b> a button that records ten seconds and then tells you, in text your screen reader reads, whether the level is good, too high, too low or silent, with steps to fix it.",
+            f"<b>Level while recording:</b> {k('Ctrl+L')} speaks the current level and highest peak, only on request so the screen reader's voice isn't recorded into the file. If the level gets high enough to distort, a warning appears in the window, and when saving you are told how many spots were affected.",
+            "<b>Microphone enhancement:</b> “None” keeps the sound exactly as the sound card gives it. “Clean up” removes low hum (desk bumps, computer fans, handling noise) and prevents clipped peaks without touching speech. “Clean up and reduce steady noise” also lowers hiss, air conditioning, fans and electrical hum: the program measures your own microphone and room while recording and lowers the noise about four times in the pauses, without making the voice sound metallic. Enhancement applies to the microphone only, never to system audio.",
+            "<b>Exclusive mode (direct access to the sound card):</b> the program takes the sound straight from the card, skipping Windows processing, so there are no hidden effects and no mixing with other programs, but no other program can use the microphone while recording. Some microphones only accept it at their native rate (192000, for example); the program captures at that rate and converts to the one you chose, so the file keeps its usual size. If the card refuses exclusive mode entirely, you are told and recording uses the normal mode.",
+            "<b>Your voice with system audio:</b> turn on “Merge a second input device” and the program picks system audio (Stereo Mix) automatically. The two sources are mixed sample by sample and their levels balanced, so your voice doesn't disappear under the music and there are no dropouts.",
+            "<b>Quality and format:</b> sample rate (48000 covers everything the ear hears), mono or stereo, 16, 24 or 32 bit, and the format: uncompressed WAV, or much smaller MP3, M4A and others written directly while recording. “Bitrate” starts at “Highest available quality”, which knows each format's ceiling.",
+        ]),
+        ("editor", "Media Editor", [
+            f"<b>Four tasks</b> from the Tools menu or {k('Ctrl+Shift+X')}: “Split a file” in two, “Split several files” at the same time in one go, “Parts of a file” joined in order into one file, and “Merge files” in the order you choose.",
+            "<b>No quality loss:</b> the result keeps the source format, and audio is copied as is without re-encoding. Audio files of different formats are merged by re-encoding them; merged video files must share the same format and size, otherwise the editor tells you why.",
+            "<b>Two modes for video:</b> “Fast, same quality” starts the cut at the nearest keyframe (a full picture every few seconds) and tells you exactly where it cut; “Exact to the second” cuts at the requested time but is slower.",
+            "<b>Times without typing:</b> the “Current Position” button takes the time from the player while you listen. Or press " + k("Ctrl+B") + " at each spot, then pick a time “From Bookmarks”, or press “Parts from Bookmarks” so every two bookmarks in a row become a part's start and end. Time boxes accept fractions of a second, like <code>1:30.5</code>.",
+            f"<b>Ghost shortcuts:</b> they work from anywhere, with the player in front or in the background: set the split point and a part's start and end, add the current file to the split and merge lists, hear what is set, and start or cancel the work, without opening the editor window. Turn them on or off with {k('Ctrl+Alt+Shift+G')} or from the Tools menu; they are all listed at the end of this guide. Closing the editor only hides it, so nothing you set is lost.",
+            "<b>Editor settings:</b> the Media Editor tab in Options: the default video cut mode, progress announcements every few percent, and changing any ghost shortcut (duplicates are refused).",
+        ]),
+        ("converter", "Format Converter", [
+            "<b>Opening:</b> from the Tools menu, or by right-clicking a file or folder in Windows Explorer. It converts a file or a whole folder in one go, announcing each file's progress and result.",
+            "<b>Real source information:</b> codec, resolution, actual bitrate, sample rate and channels, so you know what you are converting before you start.",
+            "<b>Highest quality, wisely:</b> “Highest available quality” knows each format's ceiling (320 kbps for MP3, 640 for AC3, 256 for mono Opus) and doesn't exceed the quality of a compressed source, so files don't grow for nothing. If you pick a number above what a format allows, the program uses its maximum instead of failing, and the same goes for unsupported sample rates.",
+            "<b>Advanced settings:</b> sample rate and channels for audio; constant quality (CRF) or constant bitrate, resolution and frame rate for video. Their defaults are in the Converter tab in Options.",
+        ]),
+        ("folders", "Where Your Files Are Saved", [
+            "In Documents, a folder named after the program containing “Recordings”, “Converted Files” and “Media Editor” with “Audio” and “Video” inside.",
+            "The folders are named once, in the program's language, the first time it runs and never renamed afterwards; if a name is taken, a number is added. Folders from previous versions are merged into them automatically.",
+            "When a recording is saved, the program tells you its length and where it was saved.",
+        ]),
+        ("options", "Options and Customization", [
+            f"<b>Options</b> with {k('Ctrl+Shift+P')}, with six tabs you switch with {k('Ctrl+Tab')} or {k('Ctrl+1')} to {k('Ctrl+6')}: General, Playback & Navigation, Accessibility, Converter, Recorder and Media Editor.",
+            "<b>Appearance:</b> Follow Windows, Light or Dark. Dark covers menus, title bars and every window, and takes effect after reopening the program. In high contrast mode the program always uses Windows' colours.",
+            "<b>Language:</b> Arabic with a right-to-left interface, or English. Takes effect after a restart.",
+            "<b>More in General:</b> number of recent files, a gentle chime when a conversion or recording finishes, media keys, and buttons for Windows' Default Apps and Microphone Privacy settings.",
+            "<b>Sleep timer:</b> from the Tools menu: stops playback after a number of minutes, or at the end of the current file. Choose zero to cancel it.",
+            "<b>Moving your settings:</b> “Export Settings” and “Import Settings” in the Tools menu, for a new computer or a backup.",
+            "<b>The window as you left it:</b> its size and position are kept between sessions.",
+        ]),
+        ("help", "When Something Goes Wrong", [
+            f"<b>Diagnostic report:</b> {k('Ctrl+Shift+D')} saves a text file to your Desktop with system information and the program log, with <b>no personal information</b>: no computer name, user name or file paths, so you can post it in a public group without worry.",
+            "<b>Microphone test details:</b> the test result has a “Copy technical details” button that copies a single line free of anything that identifies you, ready to paste into a support message.",
+            "<b>No sound from the microphone:</b> make sure apps are allowed to use the microphone; the “Microphone Privacy” button in the General tab opens that setting directly. If another program holds the microphone in exclusive mode, close it and try again.",
+        ]),
+        ("license", "License", [
+            "The program is free software under the GNU GPL version 3: you may use, copy, modify and distribute it under its terms, and it comes with no warranty.",
+            "The license text and the licenses of the bundled libraries are in LICENSE, THIRD-PARTY.md and the licenses folder next to the program.",
+        ]),
+    ]
+
+
+# تسلسل مفاتيح لاتيني داخل سطر عربي: «Ctrl + Tab» و«Numpad 1» و«F11»
+_KEY_RUN = re.compile(r"[A-Za-z0-9][A-Za-z0-9 +./]*[A-Za-z0-9]|[A-Za-z0-9]")
+
+
+def _keys_html(keys):
+    """
+    خانة المفاتيح في جدول الاختصارات.
+
+    مفاتيح وحدها: <kbd> واحد من اليسار لليمين. ومعها كلام عربي («أو»
+    و«إلى» و«من قائمة أدوات»): الكلام بخطه العادي من اليمين، وكل تسلسل
+    مفاتيح في <kbd> وحده؛ بخط الأكواد كانت الحروف العربية مفكّكة.
+    """
+    if not any("؀" <= ch <= "ۿ" for ch in keys):
+        return f'<kbd dir="ltr">{escape(keys)}</kbd>'
+    parts, last = [], 0
+    for match in _KEY_RUN.finditer(keys):
+        parts.append(escape(keys[last:match.start()]))
+        parts.append(f'<kbd dir="ltr">{escape(match.group())}</kbd>')
+        last = match.end()
+    parts.append(escape(keys[last:]))
+    return f'<span class="mixed-keys" dir="rtl">{"".join(parts)}</span>'
+
+
+def _shortcuts_html(lines):
+    """قائمة الاختصارات: عنوان فرعي لكل قسم، وجدول مفتاح لكل سطر."""
+    html = []
+    open_list = False
+    for line in lines:
+        if not line:
+            continue
+        if line.startswith("==="):
+            if open_list:
+                html.append("</ul>")
+            html.append(f"<h3>{escape(line.strip('= ').strip())}</h3>")
+            html.append('<ul class="keys">')
+            open_list = True
+            continue
+        if not open_list:
+            html.append('<ul class="keys">')
+            open_list = True
+        if ":" in line:
+            desc, keys = line.split(":", 1)
+            html.append(f"<li><span>{escape(desc.strip())}</span> {_keys_html(keys.strip())}</li>")
+        else:
+            html.append(f"<li>{escape(line)}</li>")
+    if open_list:
+        html.append("</ul>")
+    return "\n".join(html)
 
 
 def build_user_guide_html(tr, seek_kwargs: dict = None, shortcuts_kwargs: dict = None) -> str:
     """
-    إنشاء مستند HTML توثيقي عصري وراقي لعرض دليل الاستخدام الشامل والمنظم داخل المتصفح.
+    صفحة الدليل كاملة.
+
+    seek_kwargs بقي للتوافق مع من يناديها؛ مقادير التقديم تؤخذ من
+    shortcuts_kwargs["seek_steps"] (ما ضبطه المستخدم)، وإلا فالافتراضية.
     """
-    lang = getattr(tr, "lang", "ar")
-    is_ar = (lang == "ar")
-    
+    lang = "ar" if getattr(tr, "lang", "ar") == "ar" else "en"
+    is_ar = lang == "ar"
+    shortcuts_kwargs = shortcuts_kwargs or {}
+    steps = dict(_SEEK_DEFAULTS)
+    steps.update(shortcuts_kwargs.get("seek_steps") or {})
+
     app_name = tr.t("app_title")
     title = f"{tr.t('menu_user_guide')} — {app_name}"
-    dir_attr = "rtl" if is_ar else "ltr"
-    
-    if is_ar:
-        intro_title = f"مرحبًا بك في {app_name}"
-        intro_body = (
-            "تم تصميم هذا البرنامج خصيصًا ليقدم تجربة استماع ومشاهدة فريدة تجمع بين قوة الأداء وسهولة الاستخدام، مع عناية "
-            "فائقة بتوفير إتاحة كاملة لمستخدمي قارئات الشاشة لتتمكن من التحكم في كافة وظائف البرنامج بسلاسة تامة عبر لوحة "
-            "المفاتيح دون الحاجة لاستخدام الفأرة، مع الحفاظ التام على صفاء ونبرة الصوت الأصلية أثناء التحكم بالسرعة."
-        )
+    sections = _sections(lang, steps)
+    shortcuts_id = "shortcuts"
+    shortcuts_title = "خريطة اختصارات لوحة المفاتيح" if is_ar else "Keyboard Shortcuts Map"
+    toc_title = "المحتويات" if is_ar else "Contents"
+    version_label = (f"الإصدار {APP_VERSION}" if is_ar else f"Version {APP_VERSION}")
+    intro = (
+        f"{escape(app_name)} مشغّل صوت وفيديو صُمّم ليُستعمل كله من لوحة المفاتيح ومع قارئ الشاشة، "
+        "ومعه مسجّل صوت ومحول صيغ ومحرر للقص والدمج. كل ما يُرى في البرنامج يُسمع أيضًا، وكل ما يُسمع "
+        "تتحكم في متى يُقال. في هذا الدليل كل ميزة واختصار، والعناوين تساعدك على التنقل بمفتاح H في قارئ الشاشة."
+        if is_ar else
+        f"{escape(app_name)} is an audio and video player built to be used entirely from the keyboard and with a "
+        "screen reader, with an audio recorder, a format converter and an editor for cutting and merging. "
+        "Everything you can see in the program can also be heard, and you decide when it is said. This guide covers "
+        "every feature and shortcut; headings let you move around with H in your screen reader."
+    )
 
-        sec1_title = "1. الأساسيات والتحكم بالتشغيل"
-        sec1_body = (
-            "• <b>التشغيل والإيقاف:</b> شغّل الوسائط أو أوقفها مؤقتًا بمفتاح <code>Space</code>، أو أوقفها نهائيًا وارجع "
-            "للبداية بـ <code>Ctrl+Space</code>. الإيقاف يستجيب فورًا حتى مع ملفات الفيديو الكبيرة.\n"
-            "• <b>التنقل السريع (التقديم والإرجاع):</b> اختر مقدار القفزة بمفتاح مساعد:\n"
-            "  - السهم الأيمن والأيسر: 10 ثوانٍ.\n"
-            "  - مع <code>Ctrl</code>: دقيقة كاملة.\n"
-            "  - مع <code>Shift</code>: 5 دقائق.\n"
-            "  - مع <code>Alt</code>: 10 دقائق.\n"
-            "  - مع <code>Ctrl+Shift</code>: 30 دقيقة.\n"
-            "  - أرقام لوحة الأرقام الجانبية (Numpad من 1 إلى 9): قفز مباشر إلى نسبة من الملف (من 10% إلى 90%).\n"
-            "  ويمكنك من تبويب إمكانية الوصول اختيار أصغر قفزة يُعلَن عندها الموضع (دقيقة أو 5 أو 10 أو 30 دقيقة)، فلا "
-            "يتحول الضغط المتكرر على سهم العشر ثوانٍ إلى ثرثرة.\n"
-            "  والتقديم صار أسرع بكثير في هذا الإصدار: الصوت يعود فور وصولك للموضع الجديد بدل فترة صمت محسوسة بعد كل ضغطة.\n"
-            "• <b>التحكم بالسرعة:</b> <code>Alt</code> مع السهم لأعلى أو لأسفل يغيّر السرعة بمقدار 0.25×، "
-            "و<code>Alt+Numpad 0</code> يعيدها إلى الوضع الطبيعي — دون أن تتغير نبرة الصوت.\n"
-            "• <b>الفتح أسرع:</b> صار البرنامج يفتح أسرع بفارق ملحوظ عند أول تشغيل بعد تشغيل الجهاز."
-        )
+    toc = "\n".join(
+        f'<li><a href="#{sid}">{escape(stitle)}</a></li>' for sid, stitle, _items in sections
+    ) + f'\n<li><a href="#{shortcuts_id}">{escape(shortcuts_title)}</a></li>'
 
-        sec2_title = "2. الصيغ المدعومة"
-        sec2_body = (
-            "يشغّل البرنامج <b>أكثر من 120 صيغة</b> صوت وفيديو، ويحوّل بينها بـ<b>86 صيغة</b> مخرجات، دون الحاجة إلى تثبيت "
-            "أي حزم ترميز خارجية:\n"
-            "\n"
-            "<b>🎵 الصيغ الصوتية:</b>\n"
-            "الصيغ اليومية المعروفة مثل MP3 وWAV وAAC وFLAC، والصيغ عديمة الفقد عالية الجودة (Lossless)، وصيغ المسارح "
-            "المنزلية، وملفات الموسيقى القديمة.\n"
-            "\n"
-            "<b>🎬 صيغ الفيديو:</b>\n"
-            "من الملفات القياسية إلى صيغ الضغط الحديثة، مرورًا بملفات البث التلفزيوني وأقراص السينما، ووصولًا إلى صيغ "
-            "كاميرات المراقبة وملفات الإنتاج الاحترافي."
-        )
+    body = []
+    for sid, stitle, items in sections:
+        css = ' class="whats-new"' if sid == "new" else ""
+        body.append(f'<section id="{sid}"{css}>')
+        body.append(f"<h2>{escape(stitle)}</h2>")
+        body.append("<ul>")
+        body.extend(f"<li>{item}</li>" for item in items)
+        body.append("</ul>")
+        body.append("</section>")
 
-        sec3_title = "3. التنقل بين الملفات والعلامات المرجعية"
-        sec3_body = (
-            "• <b>التنقل داخل المجلد:</b> عند فتح أي ملف، انتقل إلى الملف التالي أو السابق في المجلد نفسه بمفتاحَي "
-            "<code>Page Down</code> و<code>Page Up</code>.\n"
-            "• <b>حفظ الموضع تلقائيًا:</b> يتذكر البرنامج أين توقفت في كل ملف، ويستأنف من عنده عند إعادة فتحه.\n"
-            "• <b>العلامات المرجعية:</b> ضع علامة عند أي موضع بـ <code>Ctrl+B</code>، وتنقّل بينها بـ <code>F2</code> "
-            "و<code>Shift+F2</code>.\n"
-            "• <b>تسمية العلامات:</b> بدل أن تسمع «العلامة عند 12 دقيقة»، سمِّها بـ <code>Ctrl+Alt+B</code> فتسمع «انتقلت "
-            "إلى بداية الفصل الثالث». اترك الاسم فارغًا لإزالته.\n"
-            "• <b>الذهاب إلى وقت محدد:</b> بـ <code>Ctrl+G</code> اكتب الوقت مباشرة — <code>90</code> أو <code>1:30</code> "
-            "أو <code>1:02:03</code>. إن كان الوقت بعد نهاية الملف يخبرك بذلك بدل أن ينتقل لمكان خاطئ."
-        )
-
-        sec4_title = "4. أدوات التحويل والتسجيل"
-        sec4_body = (
-            "• <b>محول الصيغ:</b> حوّل ملفات الصوت والفيديو من قائمة السياق (زر الفأرة الأيمن) أو من قائمة أدوات، مع دعم "
-            "المجلدات الكاملة وتنظيم الملفات الناتجة تلقائيًا.\n"
-            "• <b>مسجّل الصوت:</b> يسجّل من المايكروفون أو من صوت النظام، ويبدأ ويتوقف بـ <code>Ctrl+R</code>.\n"
-            "• <b>محرر الوسائط:</b> لقص ملفات الصوت والفيديو ودمجها، من قائمة أدوات أو بـ <code>Ctrl+Shift+X</code>. اقسم ملفًا إلى جزأين، أو اقسم عدة ملفات "
-            "عند الوقت نفسه دفعة واحدة، أو خذ مقاطع متفرقة من ملف طويل وضُمّها في ملف واحد، أو ادمج ملفات بالترتيب الذي "
-            "تختاره. يخرج الناتج بصيغة الأصل نفسها، وزر «الموضع الحالي» يأخذ الوقت من المشغّل وأنت تسمع، فلا تحتاج إلى كتابته. "
-            "وللفيديو طريقتان: «سريع بنفس الجودة» يبدأ القص من أقرب إطار مفتاحي (صورة كاملة كل بضع ثوانٍ)، "
-            "و«دقيق بالثانية» يقص عند الوقت بالضبط لكنه أبطأ. ويجب أن تتطابق ملفات الفيديو المدموجة في الصيغة والمقاس. "
-            "وأسهل طريقة: ضع علامة بـ <code>Ctrl+B</code> عند كل موضع وأنت تسمع، ثم اختر الوقت في المحرر «من العلامات»، "
-            "أو اضغط «مقاطع من العلامات» فتصير كل علامتين متتاليتين بداية مقطع ونهايته.\n"
-            "• <b>اختبار المايكروفون قبل التسجيل:</b> زر داخل نافذة المسجّل يسجّل عشر ثوانٍ ثم يخبرك <b>نصًّا مقروءًا "
-            "لقارئ الشاشة</b> هل المستوى ممتاز أم مرتفع أم منخفض أم لا يصل صوت أصلًا، مع خطوات الإصلاح. هذا يغنيك عن مؤشّر "
-            "المستوى المرئي الذي لا يفيد من لا يرى.\n"
-            "• <b>سماع المستوى أثناء التسجيل:</b> اضغط <code>Ctrl+L</code> في أي لحظة أثناء التسجيل ليُنطق لك المستوى "
-            "الحالي وأعلى قمة وصلت إليها.\n"
-            "• <b>تنبيه تشوّه الصوت:</b> إذا كان مستوى المايكروفون مرتفعًا لدرجة تُفسد التسجيل، يخبرك البرنامج عند الحفظ "
-            "ويرشدك إلى خفضه — بدل أن تكتشف الخشونة بعد فوات الأوان.\n"
-            "• <b>مستوى المايكروفون من داخل المسجّل:</b> شريط «مستوى المايكروفون» تحت اختيار الجهاز هو نفسه مستوى المايكروفون في "
-            "إعدادات الصوت في ويندوز، فلا تحتاج إلى فتحها. التشوّه يحدث داخل المايكروفون نفسه قبل أن يصل الصوت للبرنامج، "
-            "فخفض هذا المستوى هو العلاج الحقيقي. حرّكه بالأسهم درجة درجة، أو بـ <code>Page Up</code> و<code>Page Down</code> "
-            "عشر درجات، ويمكنك تغييره <b>أثناء التسجيل</b> ثم <code>Ctrl+L</code> لتسمع النتيجة. ابدأ من نحو 70%، واخفضه إن "
-            "سمعت التنبيه. إن كان الجهاز لا يسمح بالتحكم في مستواه يتعطل الشريط ويظهر تحته السبب.\n"
-            "• <b>تحسين صوت المايكروفون:</b> ثلاثة اختيارات: «بلا معالجة» يحفظ الصوت كما خرج من كرت الصوت؛ و«تنقية» تزيل "
-            "الطنين المنخفض (اهتزاز المكتب ومروحة الجهاز ولمس المايكروفون) وتمنع قص القمم دون أن تمس الكلام؛ و«تنقية وتقليل "
-            "الضوضاء الثابتة» تضيف خفض الوشيش والتكييف والمروحة وطنين الكهرباء. في هذا الإصدار صار تقليل الضوضاء يقيس ضوضاء "
-            "مايكروفونك وغرفتك بنفسه أثناء التسجيل، فيخفضها نحو أربع مرات في سكتات الكلام مع أي مايكروفون، دون أن يصير الصوت "
-            "معدنيًا.\n"
-            "• <b>الوضع الحصري (وصول مباشر لكرت الصوت):</b> البرنامج يأخذ الصوت من الكرت مباشرة دون مرور بمعالجة ويندوز، فلا "
-            "تحسينات خفية من النظام ولا خلط مع برامج أخرى، لكن لا يستعمل برنامج آخر المايكروفون أثناء التسجيل. بعض المايكروفونات "
-            "لا تقبله إلا بدقتها الأصلية (192000 مثلًا)؛ صار البرنامج يلتقط بها ويحوّل الصوت للدقة التي اخترتها، فيبقى الملف بحجمه "
-            "المعتاد. وإن رفض الكرت الوضع الحصري تمامًا يخبرك البرنامج ويسجّل بالوضع العادي.\n"
-            "• <b>قائمة أجهزة نظيفة:</b> يجمع البرنامج المداخل التي تعود لجهاز واحد في سطر واحد باسم مفهوم، بدل أن يظهر "
-            "المايكروفون الواحد أربع مرات، ويختار له أفضل طريقة اتصال بنفسه. ولكل جهاز إعداداته المحفوظة على حدة، فتصحيحك "
-            "لمايكروفون لا يفسد إعدادات غيره.\n"
-            "• <b>جودة مطابقة لجهازك:</b> يختار المسجّل تلقائيًا معدل العينة الأصلي لمايكروفونك، فلا يحدث تحويل زائد يضرّ "
-            "بنقاء الصوت.\n"
-            "• <b>أعلى جودة لكل صيغة:</b> خانة «معدل البت» في المسجّل والمحوّل تبدأ عند «أعلى جودة متاحة»، وهي تعرف سقف كل "
-            "صيغة على حدة: 320 كيلوبت للـ MP3، و640 للـ AC3، و256 للـ Opus أحادي القناة. اختر رقمًا بنفسك متى شئت — وإن "
-            "اخترت رقمًا فوق ما تحتمله الصيغة نزل البرنامج إلى أقصاها بدل أن يفشل التحويل ويتركك بلا ملف."
-        )
-
-        sec5_title = "5. إمكانية الوصول والتخصيص"
-        sec5_body = (
-            (
-                "• <b>تحكّم منفصل في كل إعلان:</b> تبويب «إمكانية الوصول» في نافذة الخيارات يعطيك صندوق اختيار مستقلًا لكل نوع "
-                "إعلان: اسم الملف، ترتيبه في القائمة، الاستئناف، حالة التشغيل، الصوت، السرعة، العلامات، مؤقت النوم وغيرها. "
-                "فعّل ما ينفعك وأسكت الباقي.\n"
-                "• <b>مفتاح رئيسي:</b> <code>Ctrl+Alt+A</code> يوقف كل الإعلانات فورًا ويعيدها، وله مربّع في أعلى التبويب "
-                "يُظهر لك حالته.\n"
-                "• <b>تنقّل سريع في نافذة الخيارات:</b> <code>Ctrl+Tab</code> للتبويب التالي، و<code>Ctrl+1</code> إلى "
-                "<code>Ctrl+5</code> للانتقال المباشر.\n"
-                "• <b>حفظ حجم النافذة وموضعها:</b> تفتح النافذة كما تركتها في المرة السابقة.\n"
-                "• <b>سرعة محفوظة لكل ملف:</b> إذا كنت تسمع كتابًا صوتيًا بسرعة 1.5×، يتذكرها البرنامج لهذا الملف وحده دون أن "
-                "يؤثر على غيره."
-            )
-        )
-
-        sec6_title = "6. عند مواجهة مشكلة"
-        sec6_body = (
-            (
-                "• <b>تقرير تشخيصي جاهز للإرسال:</b> اضغط <code>Ctrl+Shift+D</code> فيُحفظ على سطح المكتب ملف نصي يحتوي "
-                "معلومات النظام وسجل البرنامج.\n"
-                "• <b>آمن للنشر:</b> التقرير <b>لا يحتوي على أي معلومات شخصية</b> — لا اسم جهازك ولا اسم المستخدم ولا مسارات "
-                "ملفاتك. يمكنك إرفاقه في مجموعة عامة دون قلق.\n"
-                "• <b>تفاصيل اختبار المايكروفون:</b> نتيجة الاختبار فيها زر «نسخ التفاصيل التقنية» ينسخ سطرًا واحدًا خاليًا "
-                "كذلك من أي بيانات تعرّفك، جاهزًا للصق في رسالة الدعم."
-            )
-        )
-
-        sec_new_title = "7. الراديو وقوائم التشغيل والمعادل الصوتي"
-        sec_new_body = (
-            "• <b>تشغيل الروابط:</b> <code>Ctrl+U</code> يفتح خانة الرابط — وإن كنت نسخت رابطًا قبلها تجده مكتوبًا. "
-            "يشغّل الراديو والبث المباشر والملفات على الإنترنت، ويعيد الاتصال تلقائيًا إذا انقطع البث.\n"
-            "• <b>ما يُذاع الآن:</b> في محطات الراديو التي ترسل اسم الأغنية أو البرنامج، يُعلَن الاسم كلما تغيّر، "
-            "و<code>N</code> يعيده لك في أي وقت.\n"
-            "• <b>قوائم تشغيل خاصة بك:</b> <code>Ctrl+L</code> يفتح القائمة الحالية: أضف ملفات من أي مجلد أو روابط "
-            "محطات، واحذف بـ <code>Delete</code>، ورتّب بـ <code>Alt</code> مع الأسهم، ثم احفظها بـ <code>Ctrl+S</code>. "
-            "تُحفظ بصيغة M3U8 التي تفتحها معظم المشغلات، وإن كانت الملفات داخل مجلد القائمة تبقى القائمة صالحة إذا نقلت "
-            "المجلد كله. افتح أي قائمة (M3U أو M3U8 أو PLS) مثل أي ملف بـ <code>Ctrl+O</code>.\n"
-            "• <b>المعادل الصوتي:</b> <code>Q</code> و<code>Shift+Q</code> يتنقلان بين 18 نمطًا جاهزًا (منها «سماعات الرأس» "
-            "و«جهير كامل» و«قاعة كبيرة») ويُنطق اسم كل نمط. <code>Ctrl+E</code> يفتح نافذة فيها عشرة نطاقات تعدّلها "
-            "بالأسهم وتسمع النتيجة فورًا، ويبقى اختيارك محفوظًا لكل الملفات."
-        )
-
-        sec7_title = "8. دليل اختصارات لوحة المفاتيح الشامل"
-    else:
-        intro_title = f"Welcome to {app_name}"
-        intro_body = (
-            "Designed to provide a unique listening and viewing experience combining high performance and ease of use, "
-            "with complete accessibility for screen reader users to control all features smoothly via keyboard shortcuts "
-            "without needing a mouse, while preserving original audio pitch during speed adjustments."
-        )
-
-        sec1_title = "1. Basics & Playback Controls"
-        sec1_body = (
-            "• <b>Play & Pause:</b> Use <code>Space</code> to play/pause, or <code>Ctrl+Space</code> to stop completely and return to the start.\n"
-            "• <b>Adaptive Navigation:</b> Jump through timeline flexibly using arrows, modifier keys, or Numpad keys for percentage jumping.\n"
-            "• <b>Speed Control:</b> Adjust playback speed precisely without affecting natural audio pitch."
-        )
-
-        sec2_title = "2. Supported Formats Arsenal (Over 120 Formats)"
-        sec2_body = (
-            "The program plays <b>over 120 audio and video formats</b> and converts between them with <b>86 output "
-            "formats</b>, without requiring any external codecs:\n"
-            "\n"
-            "<b>🎵 Audio Formats:</b> Covers standard everyday formats, lossless high-definition audio, home theater "
-            "formats, and legacy/tracker music files.\n"
-            "\n"
-            "<b>🎬 Video Formats:</b> Supports standard formats, modern high-compression encodings, broadcast streams, and "
-            "professional surveillance or production files."
-        )
-
-        sec3_title = "3. Folder Navigation & Bookmarks"
-        sec3_body = (
-            "• <b>Folder Navigation:</b> Move smoothly between files in the same folder using <code>Page Down</code> and <code>Page Up</code>.\n"
-            "• <b>Bookmarks:</b> Automatically remembers your last playback position and allows marking custom spots for quick access."
-        )
-
-        sec4_title = "4. Conversion & Recording Tools"
-        sec4_body = (
-            "• <b>Format Converter:</b> Easily convert audio and video files using the direct context menu option or tools "
-            "window, supporting batch folder organization.\n"
-            "• <b>Audio Recorder:</b> Built-in tool for high-quality audio recording, started and stopped with "
-            "<code>Ctrl+R</code>.\n"
-            "• <b>Media Editor:</b> cuts and merges audio and video files, from the Tools menu or <code>Ctrl+Shift+X</code>. Split a file in two, split "
-            "several files at the same time in one go, join scattered parts of a long file into one file, or merge files "
-            "in the order you choose. The result keeps the original format, and the “Current Position” "
-            "button takes the time from the player while you listen. Video has two modes: “Fast, same quality” "
-            "starts the cut at the nearest keyframe (a full picture every few seconds), and “Exact to the second” "
-            "cuts at the exact time but is slower. Merged video files must share the same format and size. "
-            "The easiest way: press <code>Ctrl+B</code> at each spot while listening, then pick a time in the editor "
-            "with “From Bookmarks”, or press “Parts from Bookmarks” so every two bookmarks in a row become a part's start and end.\n"
-            "• <b>Microphone test:</b> records ten seconds and tells you <b>in text your screen reader can read</b> "
-            "whether the level is good, too high, too low, or silent — along with how to fix it.\n"
-            "• <b>Hear your level while recording:</b> press <code>Ctrl+L</code> at any time during a recording.\n"
-            "• <b>Distortion warning:</b> if the microphone level is high enough to spoil the recording, you are told when "
-            "saving.\n"
-            "• <b>Microphone level inside the recorder:</b> the “Microphone level” slider under the device choice is the same "
-            "microphone level as in Windows sound settings, so you don't need to open them. Distortion happens inside the "
-            "microphone before the sound reaches the program, so lowering this level is the real cure. Move it one step with "
-            "the arrows, or ten with <code>Page Up</code> and <code>Page Down</code>; you can change it <b>while recording</b> "
-            "and press <code>Ctrl+L</code> to hear the result. Start around 70% and lower it if you hear the warning. If a "
-            "device doesn't allow its level to be changed, the slider is disabled and the reason is shown under it.\n"
-            "• <b>Microphone enhancement:</b> three choices: “None” keeps the sound exactly as the sound card gives it; "
-            "“Clean up” removes low hum (desk bumps, computer fans, handling noise) and prevents clipped peaks without touching "
-            "speech; “Clean up and reduce steady noise” also lowers hiss, air conditioning, fans and electrical hum. In this "
-            "version the noise reduction measures your own microphone and room while recording, so it lowers the noise about "
-            "four times in the pauses with any microphone, without making the voice sound metallic.\n"
-            "• <b>Exclusive mode (direct access to the sound card):</b> the program takes the sound straight from the card, "
-            "skipping Windows processing, so there are no hidden system effects and no mixing with other programs — but no "
-            "other program can use the microphone while recording. Some microphones only accept it at their native rate "
-            "(192000, for example); the program now captures at that rate and converts to the one you chose, so the file "
-            "stays its usual size. If the card refuses exclusive mode entirely, you are told and recording uses the normal mode.\n"
-            "• <b>Matches your hardware:</b> the recorder picks your microphone's native sample rate automatically."
-        )
-
-        sec5_title = "5. Accessibility & Customization"
-        sec5_body = (
-            (
-                "• <b>Per-announcement control:</b> the Accessibility tab gives every announcement type its own checkbox — "
-                "file name, playlist position, resume, playback state, volume, speed, bookmarks, sleep timer and more.\n"
-                "• <b>Enable or silence everything at once</b> with two buttons at the top of the tab.\n"
-                "• <b>Master switch:</b> <code>Ctrl+Alt+A</code> stops all announcements instantly and brings them back.\n"
-                "• <b>Choose the smallest jump worth announcing</b> — every jump, or only a minute, 5, 10 or 30 minutes and "
-                "above.\n"
-                "• <b>Fast tab navigation</b> in Options: <code>Ctrl+Tab</code>, or <code>Ctrl+1</code> to "
-                "<code>Ctrl+5</code>.\n"
-                "• <b>Window size and position are remembered</b> between sessions.\n"
-                "• <b>Per-file playback speed</b> is remembered separately for each file."
-            )
-        )
-
-        sec6_title = "6. When Something Goes Wrong"
-        sec6_body = (
-            (
-                "• <b>Diagnostic report:</b> press <code>Ctrl+Shift+D</code> to save a text report to your Desktop.\n"
-                "• <b>Safe to share:</b> it contains <b>no personal information</b> — no computer name, user name, or file "
-                "paths — so you can post it in a public group.\n"
-                "• <b>Microphone test details</b> can be copied as a single line that is likewise free of identifying data."
-            )
-        )
-
-        sec_new_title = "7. Radio, Playlists & Equalizer"
-        sec_new_body = (
-            "• <b>Play links:</b> <code>Ctrl+U</code> opens the URL box — a link you copied beforehand is already filled "
-            "in. Plays radio, live streams and online files, and reconnects automatically if the stream drops.\n"
-            "• <b>Now playing:</b> on radio stations that send the song or show name, it is announced whenever it "
-            "changes, and <code>N</code> repeats it any time.\n"
-            "• <b>Your own playlists:</b> <code>Ctrl+L</code> opens the current playlist: add files from any folder or "
-            "station links, remove with <code>Delete</code>, reorder with <code>Alt</code> and the arrows, then save with "
-            "<code>Ctrl+S</code> as M3U8, which most players open. Open any M3U, M3U8 or PLS playlist with "
-            "<code>Ctrl+O</code>.\n"
-            "• <b>Equalizer:</b> <code>Q</code> and <code>Shift+Q</code> cycle 18 presets and speak each name. "
-            "<code>Ctrl+E</code> opens a window with ten bands you adjust with the arrows and hear immediately; your "
-            "choice is kept for all files."
-        )
-
-        sec7_title = "8. Complete Keyboard Shortcuts Map"
-
-    raw_shortcuts = get_shortcuts_list(lang, **(shortcuts_kwargs or {}))
-    formatted_shortcuts_html = []
-    
-    for line in raw_shortcuts:
-        if not line:
-            formatted_shortcuts_html.append("<br>")
-        elif line.startswith("==="):
-            clean_head = line.replace("===", "").strip()
-            formatted_shortcuts_html.append(f"</ul><h3>{clean_head}</h3><ul>")
-        else:
-            if ":" in line:
-                desc, key = line.split(":", 1)
-                formatted_shortcuts_html.append(f"<li><b>{desc.strip()}:</b> <kbd>{key.strip()}</kbd></li>")
-            else:
-                formatted_shortcuts_html.append(f"<li>{line}</li>")
-
-    shortcuts_block = "\n".join(formatted_shortcuts_html)
+    raw_shortcuts = get_shortcuts_list(lang, **shortcuts_kwargs)
 
     return f"""<!DOCTYPE html>
-<html lang="{lang}" dir="{dir_attr}">
+<html lang="{lang}" dir="{'rtl' if is_ar else 'ltr'}">
 <head>
-    <meta charset="utf-8">
-    <title>{title}</title>
-    <style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{escape(title)}</title>
+<style>
+    :root {{
+        --bg: #f3f5f8;
+        --card: #ffffff;
+        --text: #1f2933;
+        --muted: #52606d;
+        --accent: #1f6fb2;
+        --accent-soft: #e6f0fa;
+        --border: #dde3ea;
+        --kbd-bg: #eef3f8;
+        --kbd-border: #b8c6d6;
+        --new-bg: #f0f7ef;
+        --new-border: #3d8b40;
+    }}
+    @media (prefers-color-scheme: dark) {{
         :root {{
-            --primary: #1a5276;
-            --accent: #2980b9;
-            --bg: #f4f6f9;
-            --card-bg: #ffffff;
-            --text-main: #2c3e50;
-            --text-muted: #566573;
-            --border: #e5e8e8;
+            --bg: #15181d;
+            --card: #1e232a;
+            --text: #e4e8ee;
+            --muted: #a3adb9;
+            --accent: #6fb3f2;
+            --accent-soft: #23303d;
+            --border: #333b45;
+            --kbd-bg: #29313b;
+            --kbd-border: #4a5665;
+            --new-bg: #1f2c22;
+            --new-border: #6cc070;
         }}
-        body {{
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            margin: 0;
-            padding: 40px 20px;
-            background-color: var(--bg);
-            color: var(--text-main);
-            line-height: 1.8;
-        }}
-        .container {{
-            max-width: 960px;
-            margin: 0 auto;
-            background: var(--card-bg);
-            padding: 40px;
-            border-radius: 12px;
-            box-shadow: 0 5px 20px rgba(0,0,0,0.06);
-        }}
-        h1 {{
-            color: var(--primary);
-            border-bottom: 3px solid var(--accent);
-            padding-bottom: 14px;
-            margin-top: 0;
-            font-size: 28px;
-            font-weight: 700;
-        }}
-        h2 {{
-            color: var(--primary);
-            margin-top: 35px;
-            border-bottom: 1px solid var(--border);
-            padding-bottom: 8px;
-            font-size: 21px;
-        }}
-        h3 {{
-            color: var(--accent);
-            margin-top: 25px;
-            margin-bottom: 10px;
-            font-size: 17px;
-        }}
-        p {{
-            font-size: 16px;
-            color: var(--text-main);
-            white-space: pre-line;
-            margin-bottom: 18px;
-        }}
-        ul {{
-            background: #fdfefe;
-            padding: 20px 35px;
-            border-radius: 8px;
-            border: 1px solid var(--border);
-            list-style-type: none;
-            margin-top: 10px;
-        }}
-        li {{
-            margin-bottom: 10px;
-            font-size: 15px;
-            border-bottom: 1px dashed #f0f3f4;
-            padding-bottom: 6px;
-        }}
-        li:last-child {{
-            border-bottom: none;
-        }}
-        kbd {{
-            background-color: #ebf5fb;
-            border: 1px solid #aed6f1;
-            border-radius: 4px;
-            box-shadow: 0 1px 1px rgba(0,0,0,0.1);
-            color: #1b4f72;
-            display: inline-block;
-            font-family: Consolas, 'Courier New', monospace;
-            font-size: 14px;
-            font-weight: 600;
-            padding: 2px 7px;
-        }}
-        .section-card {{
-            background-color: #fafbfc;
-            border-right: 5px solid var(--accent);
-            padding: 20px 25px;
-            margin: 25px 0;
-            border-radius: 6px;
-            border: 1px solid var(--border);
-            border-right-width: 5px;
-        }}
-        [dir="ltr"] .section-card {{
-            border-right-width: 1px;
-            border-left: 5px solid var(--accent);
-        }}
-    </style>
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+        margin: 0;
+        padding: 32px 16px;
+        background: var(--bg);
+        color: var(--text);
+        font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+        font-size: 16px;
+        line-height: 1.85;
+    }}
+    main {{
+        max-width: 920px;
+        margin: 0 auto;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 36px 40px;
+    }}
+    header {{ border-bottom: 3px solid var(--accent); margin-bottom: 24px; padding-bottom: 12px; }}
+    h1 {{ margin: 0; font-size: 28px; color: var(--accent); }}
+    .version {{ color: var(--muted); margin: 4px 0 0; }}
+    .intro {{ font-size: 17px; }}
+    nav {{ background: var(--accent-soft); border-radius: 8px; padding: 14px 22px; margin: 24px 0; }}
+    nav h2 {{ margin: 0 0 6px; font-size: 18px; border: none; padding: 0; }}
+    nav ol {{ margin: 0; padding-inline-start: 22px; columns: 2; column-gap: 32px; }}
+    nav a {{ color: var(--accent); text-decoration: none; }}
+    nav a:hover, nav a:focus {{ text-decoration: underline; }}
+    h2 {{
+        font-size: 21px;
+        margin: 36px 0 10px;
+        padding-bottom: 6px;
+        border-bottom: 1px solid var(--border);
+        color: var(--accent);
+    }}
+    h3 {{ font-size: 17px; margin: 22px 0 6px; color: var(--text); }}
+    section ul {{ padding-inline-start: 22px; margin: 0; }}
+    section li {{ margin-bottom: 10px; }}
+    .whats-new {{
+        background: var(--new-bg);
+        border-inline-start: 5px solid var(--new-border);
+        border-radius: 8px;
+        padding: 4px 22px 10px;
+    }}
+    .whats-new h2 {{ border: none; color: var(--new-border); }}
+    ul.keys {{ list-style: none; padding: 0; margin: 0; border: 1px solid var(--border); border-radius: 8px; }}
+    ul.keys li {{
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 8px 14px;
+        margin: 0;
+        border-bottom: 1px solid var(--border);
+    }}
+    ul.keys li:last-child {{ border-bottom: none; }}
+    kbd {{
+        background: var(--kbd-bg);
+        border: 1px solid var(--kbd-border);
+        border-radius: 4px;
+        padding: 1px 7px;
+        font-family: Consolas, 'Courier New', monospace;
+        font-size: 14px;
+        white-space: nowrap;
+        direction: ltr;
+        unicode-bidi: isolate;
+    }}
+    .combo {{ unicode-bidi: isolate; white-space: nowrap; }}
+    ul.keys kbd {{ white-space: normal; text-align: end; }}
+    .mixed-keys {{ text-align: end; }}
+    .mixed-keys kbd {{ white-space: nowrap; }}
+    code {{ font-family: Consolas, monospace; direction: ltr; unicode-bidi: isolate; }}
+    @media (max-width: 640px) {{
+        main {{ padding: 22px 18px; }}
+        nav ol {{ columns: 1; }}
+        ul.keys li {{ flex-direction: column; gap: 2px; }}
+    }}
+</style>
 </head>
 <body>
-    <div class="container">
-        <h1>{title}</h1>
-        
-        <div class="section-card">
-            <h2>{intro_title}</h2>
-            <p>{intro_body}</p>
-        </div>
-
-        <h2>{sec1_title}</h2>
-        <p>{sec1_body}</p>
-
-        <h2>{sec2_title}</h2>
-        <p>{sec2_body}</p>
-
-        <h2>{sec3_title}</h2>
-        <p>{sec3_body}</p>
-
-        <h2>{sec4_title}</h2>
-        <p>{sec4_body}</p>
-
-        <h2>{sec5_title}</h2>
-        <p>{sec5_body}</p>
-
-        <h2>{sec6_title}</h2>
-        <p>{sec6_body}</p>
-
-        <h2>{sec_new_title}</h2>
-        <p>{sec_new_body}</p>
-
-        <h2>{sec7_title}</h2>
-        {shortcuts_block}
-    </div>
+<main>
+<header>
+    <h1>{escape(title)}</h1>
+    <p class="version">{escape(version_label)}</p>
+</header>
+<p class="intro">{intro}</p>
+<nav aria-labelledby="toc-title">
+    <h2 id="toc-title">{toc_title}</h2>
+    <ol>
+{toc}
+    </ol>
+</nav>
+{chr(10).join(body)}
+<section id="{shortcuts_id}">
+<h2>{escape(shortcuts_title)}</h2>
+{_shortcuts_html(raw_shortcuts)}
+</section>
+</main>
 </body>
 </html>"""
