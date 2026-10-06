@@ -51,6 +51,8 @@ class FocuslessSlider(wx.Slider):
 class VideoPanel(wx.Panel):
     def __init__(self, parent, name_str):
         super().__init__(parent, style=wx.FULL_REPAINT_ON_RESIZE | wx.NO_BORDER)
+        # الفيديو لا يُقلب مع الواجهة العربية
+        self.SetLayoutDirection(wx.Layout_LeftToRight)
         self.SetBackgroundColour(wx.BLACK)
         self.SetName(name_str)
     def AcceptsFocus(self): return False
@@ -378,6 +380,11 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin,
         for tw in (self, self.main_panel, self.video_panel): tw.SetDropTarget(_MediaDropTarget(self))
 
         self.controls_panel = FocuslessPanel(self.main_panel, style=wx.NO_BORDER)
+        # شريط الوقت وأزرار التشغيل والصوت من اليسار لليمين حتى في الواجهة
+        # العربية، كما في كل المشغلات: الوقت يتقدم يمينًا، و«التالي» على
+        # اليمين بسهمه. لو قُلبت صار «السابق» على اليمين وسهمه لليسار.
+        # (يُضبط قبل إنشاء الأزرار: الاتجاه يُورَث عند الإنشاء)
+        self.controls_panel.SetLayoutDirection(wx.Layout_LeftToRight)
         self.controls_panel.SetBackgroundColour(wx.Colour(250, 252, 255))
         controls_sizer = wx.BoxSizer(wx.VERTICAL)
         time_labels_sizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -605,8 +612,10 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin,
             btn.SetBackgroundColour(btn_bg)
             btn.SetForegroundColour(btn_fg)
 
-        self.play_pause_button.SetBackgroundColour(accent_color)
-        self.play_pause_button.SetForegroundColour(wx.WHITE)
+        # زر التشغيل بمظهر ويندوز الأصلي: أزرار ويندوز تتجاهل لون النص، فلما
+        # تلوّنت خلفيته بالأزرق ظهر نصه باهتًا لا يكاد يُقرأ. يتميز بخطه العريض
+        self.play_pause_button.SetBackgroundColour(wx.NullColour)
+        self.play_pause_button.SetForegroundColour(btn_fg if is_dark else wx.Colour(0, 84, 166))
 
         # الأيقونات مرسومة بلون نص الزر وقت رسمها، فلازم تترسم من جديد
         # بعد تغيير الألوان وإلا تفضل بلون السمة القديمة

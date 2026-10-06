@@ -261,7 +261,7 @@ class MediaEditorDialog(wx.Frame):
     def __init__(self, tr, announcer=None, initial_path=None, position_provider=None,
                  bookmarks_provider=None, hotkeys_enabled=None, on_hotkeys_toggled=None,
                  hide_on_close=False, settings=None, on_open_settings=None):
-        super().__init__(None, title=tr.t("editor_title"), size=(640, 600),
+        super().__init__(None, title=tr.t("editor_title"), size=(700, 640),
                          style=wx.DEFAULT_FRAME_STYLE)
         self.tr = tr
         self.announcer = announcer
@@ -342,20 +342,22 @@ class MediaEditorDialog(wx.Frame):
         outer.Add(buttons, flag=wx.ALIGN_RIGHT | wx.ALL, border=12)
 
         if self._hotkeys_enabled is not None:
-            hotkeys_row = wx.BoxSizer(wx.HORIZONTAL)
+            # الخانة في سطر وحدها والزران تحتها: في سطر واحد كان نص الزر
+            # الأول يُقص على اليسار
             self.hotkeys_checkbox = wx.CheckBox(
                 panel, label=tr.t("editor_hotkeys_checkbox", keys=self.hotkey_text("toggle")))
             self.hotkeys_checkbox.SetValue(bool(self._hotkeys_enabled))
             self.hotkeys_checkbox.Bind(wx.EVT_CHECKBOX, self._on_hotkeys_checkbox)
+            outer.Add(self.hotkeys_checkbox, flag=wx.LEFT | wx.RIGHT, border=12)
+            hotkeys_row = wx.BoxSizer(wx.HORIZONTAL)
             help_button = wx.Button(panel, label=tr.t("editor_hotkeys_list_button"))
             help_button.Bind(wx.EVT_BUTTON, self._on_hotkeys_help)
-            hotkeys_row.Add(self.hotkeys_checkbox, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=8)
             hotkeys_row.Add(help_button, flag=wx.ALIGN_CENTER_VERTICAL)
             if self._on_open_settings is not None:
                 settings_button = wx.Button(panel, label=tr.t("editor_settings_button"))
                 settings_button.Bind(wx.EVT_BUTTON, lambda e: self._on_open_settings())
                 hotkeys_row.Add(settings_button, flag=wx.ALIGN_CENTER_VERTICAL | wx.LEFT, border=8)
-            outer.Add(hotkeys_row, flag=wx.LEFT | wx.RIGHT | wx.BOTTOM, border=12)
+            outer.Add(hotkeys_row, flag=wx.ALL, border=12)
 
         panel.SetSizer(outer)
         frame_sizer = wx.BoxSizer(wx.VERTICAL)

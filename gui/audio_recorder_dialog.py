@@ -170,6 +170,9 @@ class AudioRecorderDialog(wx.Frame):
         display_sizer = wx.BoxSizer(wx.VERTICAL)
 
         self.elapsed_label = wx.StaticText(display_panel, label="00:00")
+        # أرقام لاتينية كعدّاد المشغّل: في الواجهة العربية يحوّلها ويندوز إلى
+        # أرقام هندية، وصفرها نقطة، فبدا العدّاد بالخط الكبير «•• : ••»
+        self.elapsed_label.SetLayoutDirection(wx.Layout_LeftToRight)
         self.elapsed_label.SetForegroundColour(wx.Colour(255, 255, 255))
         font_time = wx.Font(28, wx.FONTFAMILY_MODERN, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_BOLD)
         self.elapsed_label.SetFont(font_time)
@@ -311,8 +314,10 @@ class AudioRecorderDialog(wx.Frame):
         )
         bitrate_row.Add(bitrate_label, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=8)
         bitrate_row.Add(self.bitrate_choice, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=8)
-        bitrate_row.Add(self.bitrate_lossless_note, flag=wx.ALIGN_CENTER_VERTICAL)
         settings_sizer.Add(bitrate_row, flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, border=6)
+        # الملاحظة في سطر وحدها ملفوفة: بجانب عنوانها كانت تُقص من آخرها
+        self.bitrate_lossless_note.Wrap(500)
+        settings_sizer.Add(self.bitrate_lossless_note, flag=wx.LEFT | wx.RIGHT | wx.BOTTOM, border=6)
 
         preferred_bps = (
             self.settings.get_recorder_default_audio_bitrate() if self.settings is not None else 0
@@ -324,7 +329,13 @@ class AudioRecorderDialog(wx.Frame):
         # مسار الحفظ
         output_row = wx.BoxSizer(wx.HORIZONTAL)
         output_title_lbl = wx.StaticText(panel, label=tr.t("recorder_save_path"))
-        self.output_path_label = wx.StaticText(panel, label=self._output_path)
+        # المسار الطويل يُختصر من الوسط بـ«...» بدل أن يُقص آخره (اسم الملف)،
+        # ويظهر كاملًا في التلميح
+        self.output_path_label = wx.StaticText(panel, label=self._output_path,
+                                               style=wx.ST_ELLIPSIZE_MIDDLE)
+        self.output_path_label.SetToolTip(self._output_path)
+        # بلا عرض أدنى صغير يأخذ النص عرضه كاملًا فيمدّ النافذة ولا يُختصر
+        self.output_path_label.SetMinSize((60, -1))
         self.output_path_label.SetName(tr.t("recorder_output_label"))
         output_row.Add(output_title_lbl, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=8)
         output_row.Add(self.output_path_label, proportion=1, flag=wx.ALIGN_CENTER_VERTICAL)
@@ -651,6 +662,7 @@ class AudioRecorderDialog(wx.Frame):
             base, _old_ext = os.path.splitext(self._output_path)
             self._output_path = base + target_ext
             self.output_path_label.SetLabel(self._output_path)
+            self.output_path_label.SetToolTip(self._output_path)
 
         fallback_bps = (
             self.settings.get_recorder_default_audio_bitrate() if self.settings is not None else 0

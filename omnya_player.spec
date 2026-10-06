@@ -68,6 +68,16 @@ a = Analysis(
     excludes=[],
     noarchive=False,
 )
+# نسخ PortAudio التي لا يستعملها البرنامج: sounddevice على ويندوز 64 بت
+# يحمّل libportaudio64bit.dll وحده. والنسخ «-asio» فيها مكتبة ASIO من
+# Steinberg برخصة مستقلة، والبرنامج لا يستعمل ASIO أصلًا؛ ونسخ ماك وARM
+# و32 بت حجم بلا فائدة
+def _is_unused_portaudio(entry):
+    name = _os.path.basename(entry[0]).lower()
+    return name.startswith("libportaudio") and name != "libportaudio64bit.dll"
+
+a.binaries = [entry for entry in a.binaries if not _is_unused_portaudio(entry)]
+
 pyz = PYZ(a.pure)
 
 _upx_exclude = [
@@ -140,3 +150,33 @@ coll = COLLECT(
     upx_exclude=_upx_exclude,
     name='Universal Media Player',
 )
+
+# -------------------------------------------------------------------------
+# التراخيص بجانب البرنامج نفسه، لا داخل _internal: المثبّت والنسخة المحمولة
+# ينسخان مجلد dist كما هو، فتصل الرخصة لكل نسخة (كانت النسخة المحمولة بلا
+# رخصة). ومعها ملفات تراخيص المكتبات المضمَّنة من بيانات حزمها نفسها
+# (انظر THIRD-PARTY.md)
+# -------------------------------------------------------------------------
+import importlib.metadata as _metadata
+import shutil as _shutil
+
+_app_dist = _os.path.join(DISTPATH, 'Universal Media Player')
+for _name in ('LICENSE', 'THIRD-PARTY.md'):
+    _shutil.copy2(_os.path.join(SPECPATH, _name), _app_dist)
+_licenses_dist = _os.path.join(_app_dist, 'licenses')
+_shutil.copytree(_os.path.join(SPECPATH, 'licenses'), _licenses_dist, dirs_exist_ok=True)
+_shutil.copy2(_os.path.join(SPECPATH, 'resources', 'NVDA-LICENSE-NOTICE.md'), _licenses_dist)
+
+for _package in ('av', 'sounddevice', 'numpy', 'wxPython', 'python-vlc', 'cffi', 'pycparser'):
+    try:
+        _distribution = _metadata.distribution(_package)
+    except _metadata.PackageNotFoundError:
+        continue
+    for _file in _distribution.files or []:
+        _base = _os.path.basename(str(_file)).upper()
+        if _base.endswith(('.PYC', '.PY')) or not any(_key in _base for _key in ('LICENSE', 'COPYING', 'NOTICE', 'AUTHORS')):
+            continue
+        # المسار داخل الحزمة يبقى، فملفان بالاسم نفسه (numpy فيها عدة LICENSE) لا يتصادمان
+        _target = _os.path.join(_licenses_dist, _package, _os.path.dirname(str(_file)))
+        _os.makedirs(_target, exist_ok=True)
+        _shutil.copy2(str(_distribution.locate_file(_file)), _target)

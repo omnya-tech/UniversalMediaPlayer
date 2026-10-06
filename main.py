@@ -196,6 +196,29 @@ def start_ipc_server(window, logger):
     t.start()
 
 
+def apply_interface_direction(app, lang):
+    """
+    الواجهة العربية من اليمين لليسار.
+
+    كانت كل النوافذ من اليسار لليمين مع نصوص عربية: العنوان على يسار
+    خانته، و«...» في الجهة الخطأ، والكلمات الإنجليزية وسط الجمل العربية
+    مرتبة ترتيبًا غريبًا. wx يقلب النوافذ حين تكون لغة البرنامج عربية،
+    فنضبطها. وتُعاد لغة مكتبة C إلى المحايدة فورًا، فلا تتغير الفاصلة
+    العشرية في المكتبات (VLC وFFmpeg) ولا تنسيق الأرقام.
+
+    كائن اللغة يُحفظ في التطبيق: لو حُذف رجعت wx لغتها السابقة.
+    """
+    if lang != "ar":
+        return
+    import locale
+
+    app._interface_locale = wx.Locale(wx.LANGUAGE_ARABIC, wx.LOCALE_DONT_LOAD_DEFAULT)
+    try:
+        locale.setlocale(locale.LC_ALL, "C")
+    except locale.Error:
+        pass
+
+
 def main():
     logger = configure_logging()
     install_global_exception_hook(logger)
@@ -228,6 +251,7 @@ def main():
     # (انظر ToolsMixin._launch_standalone_converter)
     if "--converter-only" in args:
         app = wx.App(False)
+        apply_interface_direction(app, lang)
         from gui.converter_dialog import ConverterDialog
         from accessibility.announcer import ScreenReaderAnnouncer
 
@@ -272,6 +296,7 @@ def main():
             sys.exit(0)
 
     app = wx.App(False)
+    apply_interface_direction(app, lang)
 
     # المجلدات القديمة (أسماء تتبع اللغة) تُضم للمجلدات الثلاثة الثابتة،
     # في خيط جانبي فلا يتأخر ظهور النافذة

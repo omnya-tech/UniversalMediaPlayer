@@ -176,7 +176,10 @@ class AboutDialog(wx.Dialog):
         title_label.SetFont(title_font)
         title_label.SetForegroundColour(wx.Colour(0, 70, 140))
 
-        version_label = wx.StaticText(panel, label=tr.t("about_version", version=APP_VERSION))
+        # رقم الإصدار بأرقام لاتينية كما في عنوان النافذة والمثبّت: ويندوز
+        # يختار شكل الأرقام من الكلمة السابقة («الإصدار») فكتبه «١٫٥٫٠»؛
+        # علامة الاتجاه اليساري الخفية (U+200E) قبله تجعله لاتينيًا
+        version_label = wx.StaticText(panel, label=tr.t("about_version", version="‎" + APP_VERSION))
         version_font = wx.Font(11, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_BOLD)
         version_label.SetFont(version_font)
         version_label.SetForegroundColour(wx.Colour(80, 100, 120))
@@ -220,6 +223,8 @@ class AboutDialog(wx.Dialog):
         copyright_label = wx.StaticText(panel, label=tr.t("about_copyright"))
         copyright_label.SetFont(wx.Font(9, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL))
         copyright_label.SetForegroundColour(wx.Colour(120, 120, 120))
+        # بيان الرخصة طويل: يُلف فلا يمدّ النافذة عرضًا
+        copyright_label.Wrap(400)
 
         pub_sizer.Add(publisher_label, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.BOTTOM, 5)
         pub_sizer.Add(copyright_label, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.BOTTOM, 0)

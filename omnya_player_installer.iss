@@ -65,9 +65,8 @@ english.WarmingUp=Preparing the playback engine for first use...
 
 [Files]
 Source: "dist\Universal Media Player\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-; الرخصة وتراخيص المكتبات بجوار البرنامج (GPL v3: انظر LICENSE وTHIRD-PARTY.md)
-Source: "LICENSE"; DestDir: "{app}"; Flags: ignoreversion
-Source: "THIRD-PARTY.md"; DestDir: "{app}"; Flags: ignoreversion
+; الرخصة وTHIRD-PARTY.md ومجلد licenses داخل dist نفسه (يضعها omnya_player.spec
+; بعد البناء)، فيصلان مع السطر السابق ومع النسخة المحمولة كذلك
 
 [Icons]
 ; ربط أسماء الاختصارات (على سطح المكتب وقائمة إبدأ) بمفتاح الترجمة cm:AppName

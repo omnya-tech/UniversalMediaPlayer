@@ -46,10 +46,10 @@ STRINGS = {
         # ---- معلومات عن البرنامج ----
         "about_description": "مشغل وسائط صوتية وفيديو مصمَّم ليكون متاحًا بالكامل لمستخدمي قارئات الشاشة، مع دعم كامل للتنقل والتحكم بلوحة المفاتيح، وأدوات لتسجيل الصوت وتحويل صيغ الملفات.",
         "about_publisher": "الناشر: Omnya",
-        "about_copyright": "جميع الحقوق محفوظة",
+        "about_copyright": "حقوق النشر © 2026 Omnya. برنامج حر تحت رخصة GNU GPL الإصدار الثالث: لك أن تستعمله وتنسخه وتعدّله وتوزّعه بشروطها، وهو بلا أي ضمان. نص الرخصة وتراخيص المكتبات في ملفي LICENSE وTHIRD-PARTY.md ومجلد licenses بجانب البرنامج.",
         "about_credit": "⚜ صُمِّم وطُوِّر بواسطة محمد شعراوي ⚜",
         "about_features_title": "الميزات الأساسية",
-        "about_features_text": "▶ مشغل وسائط شامل: جودة فائقة ودعم لجميع صيغ الصوت والفيديو.\n🔄 محول صيغ مدمج: تحويل سريع للملفات والمجلدات بأعلى كفاءة.\n🎙️ مسجل صوت احترافي: التقاط الصوت من مختلف المنافذ بخيارات متعددة.\n⭐ إدارة ذكية: نظام ألبومات متقدم، علامات مرجعية، ومؤقت نوم.",
+        "about_features_text": "▶ مشغل وسائط شامل: جودة عالية ودعم لصيغ الصوت والفيديو.\n✂️ محرر الوسائط: قص الصوت والفيديو ودمجهما، مع اختصارات تعمل من أي مكان.\n🔄 محول صيغ مدمج: تحويل سريع للملفات والمجلدات.\n🎙️ مسجل صوت: التقاط من المايكروفون وصوت الجهاز مع تنقية الصوت.\n⭐ إدارة ذكية: قوائم تشغيل محفوظة، وعلامات مرجعية، ومؤقت نوم.",
         "about_vision_title": "تجربة استثنائية",
         "about_vision_text": "نؤمن بأن التكنولوجيا صُممت لتخدم الإنسان بلا عوائق. لذا تم ابتكار هذا البرنامج ليقدم لك استجابة لحظية وأداءً يغنيك عن عشرات البرامج، مع التزامنا الراسخ بتوفير بيئة ذكية وشاملة تلبي احتياجاتك باحترافية مطلقة.",
 
@@ -725,10 +725,10 @@ STRINGS = {
         # ---- About Information ----
         "about_description": "An audio and video player designed to be fully accessible to screen reader users, with complete keyboard navigation, tools for audio recording and format conversion.",
         "about_publisher": "Publisher: Omnya",
-        "about_copyright": "All rights reserved",
+        "about_copyright": "Copyright © 2026 Omnya. Free software under the GNU GPL version 3: you may use, copy, modify and distribute it under its terms, and it comes with no warranty. The license and the libraries' licenses are in LICENSE, THIRD-PARTY.md and the licenses folder next to the program.",
         "about_credit": "⚜ Designed & Developed by Mohamed Elsharawy ⚜",
         "about_features_title": "Main Features",
-        "about_features_text": "▶ Universal Media Player: High quality and support for all formats.\n🔄 Built-in Converter: Fast file and folder conversion.\n🎙️ Pro Audio Recorder: Capture audio from multiple sources.\n⭐ Smart Management: Advanced albums, bookmarks, and sleep timer.",
+        "about_features_text": "▶ Universal Media Player: high quality and support for audio and video formats.\n✂️ Media Editor: cut and merge audio and video, with shortcuts that work from anywhere.\n🔄 Built-in Converter: fast file and folder conversion.\n🎙️ Audio Recorder: capture the microphone and system audio, with sound clean-up.\n⭐ Smart Management: saved playlists, bookmarks, and sleep timer.",
         "about_vision_title": "Exceptional Experience",
         "about_vision_text": "We believe technology is designed to serve people without barriers. This player was created to provide instant response and performance, replacing dozens of apps with a smart, comprehensive environment.",
 

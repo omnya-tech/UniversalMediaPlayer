@@ -169,6 +169,7 @@ class ConverterDialog(wx.Frame):
             if not display_folder:
                 display_folder = self.tr.t("converter_output_folder_none")
             self.output_folder_label.SetLabel(display_folder)
+            self.output_folder_label.SetToolTip(display_folder)
             self.Layout()
 
     def add_input_files(self, paths):
@@ -385,7 +386,12 @@ class ConverterDialog(wx.Frame):
             else self._output_folder
         )
         initial_folder_text = display_folder if display_folder else tr.t("converter_output_folder_none")
-        self.output_folder_label = wx.StaticText(panel, label=initial_folder_text)
+        # المسار الطويل يُختصر من الوسط بـ«...»، ويظهر كاملًا في التلميح
+        self.output_folder_label = wx.StaticText(panel, label=initial_folder_text,
+                                                 style=wx.ST_ELLIPSIZE_MIDDLE)
+        self.output_folder_label.SetToolTip(initial_folder_text)
+        # بلا عرض أدنى صغير يأخذ النص عرضه كاملًا فيمدّ النافذة ولا يُختصر
+        self.output_folder_label.SetMinSize((60, -1))
         self.output_folder_label.SetName(tr.t("converter_output_folder_label"))
         output_row.Add(self.output_folder_label, proportion=1, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=8)
         sizer.Add(output_row, flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, border=12)
