@@ -1498,16 +1498,19 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin,
             # (شوف _announce_seek وحدّ الإعلان الأدنى)
             self._hold_start_position = self._hold_target_position
             self.engine.set_muted(True)
-            self._step_hold_seek(initial_delta_seconds)
+            # الضغطة الأولى بالمقدار المضبوط بالضبط: كان المعامل يكبر قبلها
+            # فتقفز الضغطة الواحدة 12.5 ثانية بدل 10. التسارع للضغط المطوّل
+            self._step_hold_seek(initial_delta_seconds, accelerate=False)
             self._hold_seek_timer.Start(80)
 
-    def _step_hold_seek(self, base_delta):
+    def _step_hold_seek(self, base_delta, accelerate=True):
         if not self.engine.duration:
             return
         if self._hold_target_position is None:
             self._hold_target_position = self.engine.get_effective_position()
 
-        self._seek_speed_multiplier = min(60.0, self._seek_speed_multiplier * 1.25)
+        if accelerate:
+            self._seek_speed_multiplier = min(60.0, self._seek_speed_multiplier * 1.25)
         step = base_delta * self._seek_speed_multiplier
 
         self._hold_target_position = max(0.0, min(self.engine.duration, self._hold_target_position + step))
