@@ -7,6 +7,7 @@
 """
 
 import queue
+import threading
 import time
 
 import numpy as np
@@ -26,6 +27,37 @@ class DualInputMixin:
     _SECONDARY_MAX_BACKLOG = 0.3
     _SECONDARY_KEEP_BACKLOG = 0.1
 
+    def _reset_alignment(self):
+        # ما وصل من الأول وما أخذه الكاتب منه (بمعدل الالتقاط)، وهل بدأ الثاني،
+        # وكم كتب الكاتب صمتًا مكانه قبل أن يبدأ (بعيّنات الملف)
+        self._pri_frames_in = 0
+        self._pri_frames_taken = 0
+        self._sec_started = False
+        self._sec_prefilled = 0
+        self._align_lock = threading.Lock()
+
+    def _secondary_lead(self, frames):
+        """
+        صمت يسبق أول كتلة من الثاني: ما سجّله الأول قبلها، ناقص ما كتبه
+        الكاتب صمتًا مكانه قبل أن يبدأ (وإلا حُسبت الفترة نفسها مرتين).
+        """
+        with self._align_lock:
+            self._sec_started = True
+            return self._primary_frames_in_file_rate() - frames - self._sec_prefilled
+
+    def _capture_to_file_ratio(self):
+        capture = getattr(self, "_capture_rate", None) or self._sample_rate or 48000
+        return (self._sample_rate or capture) / capture
+
+    def _primary_frames_in_file_rate(self):
+        """ما وصل من الأول منذ بدء التسجيل، بعيّنات الملف (والثاني بمعدل الملف)."""
+        return int(round(self._pri_frames_in * self._capture_to_file_ratio()))
+
+    def _primary_pending_frames(self):
+        """ما وصل من الأول ولم يأخذه الكاتب بعد، بعيّنات الملف."""
+        pending = max(0, self._pri_frames_in - self._pri_frames_taken)
+        return int(round(pending * self._capture_to_file_ratio()))
+
     def _take_secondary(self, count):
         """
         بالضبط count عينة من الجهاز الثاني، لتُدمج مع مثلها من الأول.
@@ -42,6 +74,12 @@ class DualInputMixin:
         ذلك في السجل. ولو تراكم أكثر من اللازم (ساعة الثاني أسرع) يُقصّ
         الزائد مرة واحدة بدل أن يتأخر صوته عن الأول باستمرار.
         """
+        with self._align_lock:
+            if not self._sec_started:
+                # الثاني لم يبدأ بعد: صمت مكانه بلا انتظار، ويُخصم من صمت بدايته
+                self._sec_prefilled += count
+                return np.zeros((count, self._sec_buffer.shape[1]), dtype=self._sec_buffer.dtype)
+
         buffer = self._sec_buffer
         deadline = time.monotonic() + self._SECONDARY_WAIT
         while True:
@@ -57,16 +95,22 @@ class DualInputMixin:
                 break
             time.sleep(0.005)
 
+        # الثاني سابق للأول فقط بما يزيد على ما لم يُكتب بعد من الأول: مخزن
+        # كبير وقت يتأخر الكاتب (أول التسجيل مثلًا) ليس سبقًا، وقصّه كان
+        # سيُفسد المحاذاة (شوف _audio_callback_sec)
         rate = self._sample_rate or 48000
-        if len(buffer) - count > rate * self._SECONDARY_MAX_BACKLOG:
-            excess = len(buffer) - count - int(rate * self._SECONDARY_KEEP_BACKLOG)
+        ahead = len(buffer) - count - self._primary_pending_frames()
+        if ahead > rate * self._SECONDARY_MAX_BACKLOG:
+            excess = ahead - int(rate * self._SECONDARY_KEEP_BACKLOG)
             buffer = buffer[excess:]
             self._sec_overruns += 1
 
         taken = buffer[:count]
         self._sec_buffer = buffer[count:]
         if len(taken) < count:
-            self._sec_underruns += 1
+            # بعد الإيقاف أُغلق الجهازان، وما بقي من الأول بلا مقابل متوقَّع
+            if not self._stop_flag.is_set():
+                self._sec_underruns += 1
             padding = np.zeros((count - len(taken), buffer.shape[1]), dtype=buffer.dtype)
             taken = np.concatenate([taken, padding])
         return taken

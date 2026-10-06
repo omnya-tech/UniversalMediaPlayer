@@ -178,3 +178,72 @@ def test_dual_recording_keeps_the_microphone_steady(tmp_path, secondary_block):
     assert duration == pytest.approx(3.0, abs=0.02)
     assert levels.min() > 0.8 * levels.mean()
     assert levels.max() < 1.2 * levels.mean()
+
+
+@pytest.mark.parametrize("live", [False, True])
+def test_late_second_device_stays_aligned_with_the_first(tmp_path, live):
+    """
+    الجهاز الثاني يبدأ بعد الأول (0.2 ثانية هنا): صوته يقع في الملف عند
+    لحظته الحقيقية.
+
+    نبضة في كل جهاز عند الثانية 0.3 الحقيقية. كان أول ما يصل من الثاني
+    يُدمج مع أول الأول، فتقع نبضته عند 0.1 بدل 0.3 (سابقة بمقدار تأخر بدئه)،
+    وآخر الأول يُكمَّل بصمت بعد الإيقاف.
+
+    live: الكاتب يعمل والكتل تصل كل 10 مللي ثانية كالجهاز الحقيقي؛ وقتها
+    يكتب صمتًا مكان الثاني قبل أن يبدأ، ولا يُحسب ذلك مرتين.
+    """
+    import threading
+    import time
+    import wave
+
+    rate, block = 48000, 480
+    recorder = AudioRecorder()
+    recorder._sample_rate, recorder._channels = rate, 1
+    recorder._dtype, recorder._max_abs, recorder._bit_depth = "int16", 32768.0, 16
+    recorder._direct_encode = False
+    recorder._balance_enabled = False
+    path = str(tmp_path / "aligned.wav")
+    recorder._wave_file = wave.open(path, "wb")
+    recorder._wave_file.setnchannels(1)
+    recorder._wave_file.setsampwidth(2)
+    recorder._wave_file.setframerate(rate)
+    recorder._has_dual_input = True
+    recorder._reset_secondary_buffer(1)
+    recorder._reset_alignment()
+    status = type("Status", (), {"input_overflow": False})()
+
+    def blocks(marker_at, total):
+        signal = np.zeros(total, dtype="int16")
+        signal[marker_at] = 10000
+        return [signal[i:i + block].reshape(-1, 1) for i in range(0, total, block)]
+
+    primary = blocks(int(0.3 * rate), rate)                   # يبدأ عند 0
+    secondary = blocks(int(0.3 * rate) - int(0.2 * rate), int(0.8 * rate))  # يبدأ عند 0.2
+    late = int(0.2 * rate) // block
+    writer = threading.Thread(target=recorder._writer_loop) if live else None
+    if writer:
+        writer.start()
+    for index, chunk in enumerate(primary):
+        recorder._audio_callback_pri(chunk, len(chunk), None, status)
+        if index >= late and index - late < len(secondary):
+            sec = secondary[index - late]
+            recorder._audio_callback_sec(sec, len(sec), None, status)
+        if live:
+            time.sleep(0.01)
+
+    recorder._stop_flag.set()
+    if writer:
+        writer.join()
+    else:
+        recorder._writer_loop()
+    recorder._wave_file.close()
+
+    with wave.open(path) as handle:
+        samples = np.frombuffer(handle.readframes(handle.getnframes()), dtype="int16")
+    peaks = np.flatnonzero(np.abs(samples) > 1000)
+    # النبضتان معًا في موضع واحد: (10000 + 10000) × معامل الدمج
+    assert list(peaks) == [int(0.3 * rate)]
+    assert samples[int(0.3 * rate)] == 10000
+    assert recorder._sec_overruns == 0
+    assert recorder._sec_underruns == 0

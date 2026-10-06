@@ -198,6 +198,7 @@ class AudioRecorder(DualInputMixin, InputDeviceMixin, DirectEncoderMixin):
         self._balance_pri = TrackBalancer()
         self._balance_sec = TrackBalancer()
         self._reset_secondary_buffer(1)
+        self._reset_alignment()
 
         # رصد التشبّع: عدد العيّنات المتشبّعة وعدد الأحداث، وموضع آخر
         # حدث وطول السلسلة الحالية عشان الحدث اللي بيمتد على أكتر من
@@ -359,6 +360,8 @@ class AudioRecorder(DualInputMixin, InputDeviceMixin, DirectEncoderMixin):
         self._balance_pri = TrackBalancer()
         self._balance_sec = TrackBalancer()
         self._reset_secondary_buffer()
+        # قبل فتح الجهازين: العدّ يبدأ مع أول كتلة من الأول
+        self._reset_alignment()
 
         self.enhance_level = enhance_level
         self.exclusive_requested = bool(exclusive)
@@ -508,6 +511,7 @@ class AudioRecorder(DualInputMixin, InputDeviceMixin, DirectEncoderMixin):
         if status.input_overflow:
             self._input_overflows += 1
         if self._pause_flag.is_set(): return
+        self._pri_frames_in += frames
         data = self._format_channels(indata.copy())
         try: self._queue_pri.put_nowait(data)
         except queue.Full: pass
@@ -517,6 +521,15 @@ class AudioRecorder(DualInputMixin, InputDeviceMixin, DirectEncoderMixin):
             self._input_overflows += 1
         if self._pause_flag.is_set(): return
         data = self._format_channels(indata.copy())
+        if not self._sec_started:
+            # الجهاز الثاني يبدأ بعد الأول بعشرات أو مئات المللي ثواني
+            # (والبلوتوث بأكثر من ثانية). صمت بطول ما سجّله الأول قبله، فتقع
+            # كل عيّنة منه أمام ما سُجّل في اللحظة نفسها من الأول. كان أول ما
+            # يصل منه يُدمج مع أول الأول، فيسبق صوته الحقيقي طوال التسجيل
+            lead = self._secondary_lead(frames)
+            if lead > 0:
+                try: self._queue_sec.put_nowait(np.zeros((lead, data.shape[1]), dtype=data.dtype))
+                except queue.Full: pass
         try: self._queue_sec.put_nowait(data)
         except queue.Full: pass
 
@@ -536,6 +549,7 @@ class AudioRecorder(DualInputMixin, InputDeviceMixin, DirectEncoderMixin):
                 chunk_pri = self._queue_pri.get(timeout=0.2)
             except queue.Empty:
                 continue
+            self._pri_frames_taken += len(chunk_pri)
 
             # التشبّع يُرصد على ما خرج من كرت الصوت قبل أي معالجة: المحدد
             # يمنع القص في الملف، لكن المايك المرتفع يستحق التنبيه
