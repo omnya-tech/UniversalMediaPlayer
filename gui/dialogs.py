@@ -844,7 +844,7 @@ class OptionsDialog(wx.Dialog):
 
         recorder_row1 = wx.BoxSizer(wx.HORIZONTAL)
         rate_label = wx.StaticText(panel, label=tr.t("recorder_sample_rate_label"))
-        self.recorder_rate_choice = wx.Choice(panel, choices=[f"{rate} Hz" for rate in SUPPORTED_SAMPLE_RATES])
+        self.recorder_rate_choice = wx.Choice(panel, choices=[tr.t("sample_rate_value", rate=rate) for rate in SUPPORTED_SAMPLE_RATES])
         self.recorder_rate_choice.SetName(tr.t("recorder_sample_rate_label"))
         saved_rate = _safe_get_setting(settings, "recorder_default_sample_rate", 44100)
         self.recorder_rate_choice.SetSelection(

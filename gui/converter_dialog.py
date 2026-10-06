@@ -555,7 +555,7 @@ class ConverterDialog(wx.Frame):
                 tr.t(
                     "converter_file_info_audio_line",
                     codec=audio["codec"] or na,
-                    sample_rate=f"{audio['sample_rate']} Hz" if audio["sample_rate"] else na,
+                    sample_rate=self.tr.t("sample_rate_value", rate=audio["sample_rate"]) if audio["sample_rate"] else na,
                     channels=str(audio["channels"]) if audio["channels"] else na,
                     bit_rate=_format_bit_rate(tr, audio["bit_rate"])
                     or _format_bit_rate(tr, info["overall_bit_rate"])
@@ -642,7 +642,7 @@ class ConverterDialog(wx.Frame):
         self.sample_rate_choice.Clear()
         self.sample_rate_choice.Append(self.tr.t("converter_sample_rate_source"), None)
         for rate in rates_to_show:
-            self.sample_rate_choice.Append(f"{rate} Hz", rate)
+            self.sample_rate_choice.Append(self.tr.t("sample_rate_value", rate=rate), rate)
 
         if previous_rate is not None and previous_rate in rates_to_show:
             for index in range(self.sample_rate_choice.GetCount()):

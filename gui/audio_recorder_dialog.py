@@ -632,7 +632,9 @@ class AudioRecorderDialog(wx.Frame):
         wanted_channels = min(int(profile.get("channels", 1)), max_channels)
         self.channels_choice.SetSelection(1 if wanted_channels == 2 else 0)
 
-        self.rate_choice.Set([f"{rate} Hz" for rate in working_rates])
+        # «48000 هرتز» لا «Hz 48000»: الوحدة اللاتينية كانت تنقلب أمام الرقم في
+        # الواجهة العربية، وقارئ الشاشة ينطقها حرفين. الرقم أولًا فيُقرأ بـsplit
+        self.rate_choice.Set([self.tr.t("sample_rate_value", rate=rate) for rate in working_rates])
         wanted_rate = int(profile.get("sample_rate", working_rates[0]))
         self.rate_choice.SetSelection(
             working_rates.index(wanted_rate) if wanted_rate in working_rates else 0
