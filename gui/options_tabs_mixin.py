@@ -24,7 +24,13 @@ from gui.editor_hotkeys import (
     MODIFIER_CHOICES as EDITOR_MODIFIER_CHOICES,
     current_hotkeys,
 )
-from gui.options_helpers import _safe_get_setting, _safe_set_setting, _add_group_box, _add_hint, _EDITOR_PROGRESS_STEPS
+from gui.options_helpers import (
+    _safe_get_setting,
+    _safe_set_setting,
+    _add_group_box,
+    _add_hint,
+    _EDITOR_PROGRESS_STEPS,
+)
 
 logger = logging.getLogger(__name__)
 

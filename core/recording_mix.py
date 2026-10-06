@@ -1,0 +1,106 @@
+# -*- coding: utf-8 -*-
+"""
+دمج جهازين في تسجيل واحد (المايكروفون وصوت النظام مثلًا): أخذ عيّنات الجهاز
+الثاني بالعدد المطلوب بالضبط من مخزن، وموازنة المسارين ودمجهما.
+
+نُقلت كما هي من core/audio_recorder.py.
+"""
+
+import queue
+import time
+
+import numpy as np
+
+
+class DualInputMixin:
+    """دمج الجهاز الثاني مع الأول."""
+
+    # بعد الموازنة كل مسار عند المستوى المستهدف، فالنص بيخلّي المجموع
+    # تحت السقف
+    _MIX_GAIN = 0.5
+
+    # أقصى انتظار لصوت الجهاز الثاني قبل الكتابة بدونه (بالثواني)، وأقصى
+    # ما يتراكم منه قبل أن يُقصّ الزائد: الجهازان بساعتين مختلفتين، فأحدهما
+    # يسبق الآخر ببطء
+    _SECONDARY_WAIT = 0.1
+    _SECONDARY_MAX_BACKLOG = 0.3
+    _SECONDARY_KEEP_BACKLOG = 0.1
+
+    def _take_secondary(self, count):
+        """
+        بالضبط count عينة من الجهاز الثاني، لتُدمج مع مثلها من الأول.
+
+        الجهازان يرسلان كتلًا بأحجام وإيقاعات مختلفة. الكود القديم كان
+        يدمج كتلة بكتلة: لو لم تكن كتلة الثاني جاهزة في اللحظة نفسها كُتب
+        الأول وحده بمستوى كامل، والمدموج يُكتب بنصف المستوى، فكان صوت
+        المايكروفون يرتفع وينخفض كل عشر مللي ثوانٍ تقريبًا. هذا ما وصفه
+        مستخدمون بانقطاعات قصيرة وتشويه. والكتل المختلفة الأطوال كانت
+        تُكمَّل بصمت في وسط التسجيل.
+
+        الآن عينات الثاني تتجمع في مخزن، ويؤخذ منه العدد المطلوب بالضبط.
+        لو نقص ينتظر قليلًا، ولو بقي ناقصًا (جهاز توقف) يكمّل بصمت ويُحسب
+        ذلك في السجل. ولو تراكم أكثر من اللازم (ساعة الثاني أسرع) يُقصّ
+        الزائد مرة واحدة بدل أن يتأخر صوته عن الأول باستمرار.
+        """
+        buffer = self._sec_buffer
+        deadline = time.monotonic() + self._SECONDARY_WAIT
+        while True:
+            parts = [buffer]
+            while True:
+                try:
+                    parts.append(self._queue_sec.get_nowait())
+                except queue.Empty:
+                    break
+            if len(parts) > 1:
+                buffer = np.concatenate(parts)
+            if len(buffer) >= count or time.monotonic() >= deadline or self._stop_flag.is_set():
+                break
+            time.sleep(0.005)
+
+        rate = self._sample_rate or 48000
+        if len(buffer) - count > rate * self._SECONDARY_MAX_BACKLOG:
+            excess = len(buffer) - count - int(rate * self._SECONDARY_KEEP_BACKLOG)
+            buffer = buffer[excess:]
+            self._sec_overruns += 1
+
+        taken = buffer[:count]
+        self._sec_buffer = buffer[count:]
+        if len(taken) < count:
+            self._sec_underruns += 1
+            padding = np.zeros((count - len(taken), buffer.shape[1]), dtype=buffer.dtype)
+            taken = np.concatenate([taken, padding])
+        return taken
+
+    def _mix_audio_chunks(self, c1, c2):
+        """
+        يدمج المسارين متوازنين، بلا قصّ وبلا فقدان عيّنات.
+
+        الكتلتان بيوصلوا بأطوال مختلفة: الجهازان مستقلان وكل واحد بيدّي
+        كتله بإيقاعه. الكود القديم كان بياخد الأقصر منهما، فأي زيادة في
+        المسار الأساسي كانت **بتترمي** - يعني قطع من صوت المستخدم نفسه
+        بتضيع. دلوقتي بنمدّ الأقصر بصمت بدل ما نقصّ الأطول.
+
+        والتوازن: كل مسار بياخد معامله من مستواه الفعلي، فالمايك ما
+        يضيعش تحت الموسيقى ولا العكس. القياس على حالات واقعية أظهر
+        فرقًا يوصل أربعة وعشرين ديسيبل بين المصدرين.
+        """
+        len1, len2 = len(c1), len(c2)
+        length = max(len1, len2)
+
+        f1 = np.zeros((length, c1.shape[1]), dtype=np.float32)
+        f1[:len1] = c1
+        f2 = np.zeros((length, c1.shape[1]), dtype=np.float32)
+        # الثانوي ممكن يجي بقنوات أكتر من الأساسي
+        usable = min(c2.shape[1], c1.shape[1])
+        f2[:len2, :usable] = c2[:, :usable]
+
+        if self._balance_enabled:
+            rate = self._sample_rate or 48000
+            if len1:
+                f1 *= self._balance_pri.update(c1, self._max_abs, rate)
+            if len2:
+                f2 *= self._balance_sec.update(c2, self._max_abs, rate)
+
+        mixed = (f1 + f2) * self._MIX_GAIN
+        np.clip(mixed, -self._max_abs, self._max_abs - 1.0, out=mixed)
+        return mixed.astype(self._dtype)

@@ -10,7 +10,14 @@ import tempfile
 
 import wx
 
-from core.audio_recorder import SUPPORTED_BIT_DEPTHS, SUPPORTED_SAMPLE_RATES, AudioRecorder, RecorderError, list_input_devices, replace_with_retry
+from core.audio_recorder import (
+    SUPPORTED_BIT_DEPTHS,
+    SUPPORTED_SAMPLE_RATES,
+    AudioRecorder,
+    RecorderError,
+    list_input_devices,
+    replace_with_retry,
+)
 from core.formats import AUDIO_FORMATS
 from core.voice_enhance import DEFAULT_ENHANCE_LEVEL, ENHANCE_LEVELS
 from core.logging_setup import configure_logging
