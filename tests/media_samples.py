@@ -14,7 +14,8 @@ def _mux(container, stream, frame):
 
 
 def write_sample_media(out_path, seconds=2, with_video=True, audio_codec="aac",
-                       audio_bit_rate=None, video_bit_rate=None, rate=44_100):
+                       audio_bit_rate=None, video_bit_rate=None, rate=44_100,
+                       audio_options=None, keyframe_every=None, size=(160, 120)):
     """
     ملف بنغمة 440 هرتز، ومعاه (اختياريًا) فيديو 160x120 بـ 10 إطارات/ث.
     الحاوية بتتحدد من امتداد out_path.
@@ -23,17 +24,21 @@ def write_sample_media(out_path, seconds=2, with_video=True, audio_codec="aac",
     with av.open(out_path, "w") as container:
         if with_video:
             video = container.add_stream("libx264", rate=10)
-            video.width, video.height, video.pix_fmt = 160, 120, "yuv420p"
+            video.width, video.height, video.pix_fmt = size[0], size[1], "yuv420p"
+            if keyframe_every:
+                # إطار مفتاحي كل كذا إطار، لاختبار القص السريع للفيديو
+                video.codec_context.gop_size = keyframe_every
+                video.options = {"keyint_min": str(keyframe_every), "sc_threshold": "0"}
             if video_bit_rate:
                 video.bit_rate = video_bit_rate
-        audio = container.add_stream(audio_codec, rate=rate)
+        audio = container.add_stream(audio_codec, rate=rate, options=audio_options or {})
         audio.layout = "mono"
         if audio_bit_rate:
             audio.bit_rate = audio_bit_rate
 
         if with_video:
             for i in range(seconds * 10):
-                img = np.full((120, 160, 3), (i * 12) % 256, dtype=np.uint8)
+                img = np.full((size[1], size[0], 3), (i * 12) % 256, dtype=np.uint8)
                 _mux(container, video, av.VideoFrame.from_ndarray(img, format="rgb24"))
             _mux(container, video, None)
 

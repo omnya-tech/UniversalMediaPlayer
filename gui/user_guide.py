@@ -64,6 +64,7 @@ def get_shortcuts_list(lang: str = "ar") -> list:
             "",
             "=== الأدوات والنوافذ العامة ===",
             "فتح نافذة مسجل الصوت: Ctrl + Shift + R",
+            "فتح نافذة محرر الوسائط: Ctrl + Shift + X",
             "بدء / إيقاف التسجيل الصوتي المباشر: Ctrl + R",
             "إعلان مستوى الصوت أثناء التسجيل (داخل نافذة المسجّل): Ctrl + L",
             "فتح نافذة محول الصيغ: من قائمة أدوات (Tools Menu)",
@@ -129,6 +130,7 @@ def get_shortcuts_list(lang: str = "ar") -> list:
             "",
             "=== Tools & Windows ===",
             "Open Audio Recorder Window: Ctrl + Shift + R",
+            "Open Media Editor Window: Ctrl + Shift + X",
             "Start / Stop Quick Recording Immediately: Ctrl + R",
             "Open Format Converter Window: From Tools Menu",
             "Open Program Options: Ctrl + Shift + P",
@@ -212,6 +214,13 @@ def build_user_guide_html(tr, seek_kwargs: dict = None) -> str:
             "• <b>محول الصيغ:</b> حوّل ملفات الصوت والفيديو من قائمة السياق (زر الفأرة الأيمن) أو من قائمة أدوات، مع دعم "
             "المجلدات الكاملة وتنظيم الملفات الناتجة تلقائيًا.\n"
             "• <b>مسجّل الصوت:</b> يسجّل من المايكروفون أو من صوت النظام، ويبدأ ويتوقف بـ <code>Ctrl+R</code>.\n"
+            "• <b>محرر الوسائط:</b> لقص ملفات الصوت والفيديو ودمجها، من قائمة أدوات أو بـ <code>Ctrl+Shift+X</code>. اقسم ملفًا لجزأين، أو اقسم عدة ملفات "
+            "عند نفس الوقت دفعة واحدة، أو خذ مقاطع متفرقة من ملف طويل وضمها في ملف واحد، أو ادمج ملفات بالترتيب الذي "
+            "تختاره. الناتج بنفس صيغة الأصل، وزر «الموضع الحالي» يأخذ الوقت من المشغّل وأنت تسمع فلا تحتاج لكتابته. "
+            "وللفيديو طريقتان: «سريع بنفس الجودة» يبدأ القص من أقرب إطار مفتاحي (صورة كاملة كل بضع ثوانٍ)، "
+            "و«دقيق بالثانية» يقص عند الوقت بالضبط لكنه أبطأ. والفيديوهات المدموجة يجب أن تكون بنفس الصيغة والمقاس. "
+            "وأسهل طريقة: ضع علامة بـ <code>Ctrl+B</code> عند كل موضع وأنت تسمع، ثم في المحرر اختر الوقت «من العلامات»، "
+            "أو اضغط «مقاطع من العلامات» فتصير كل علامتين بداية مقطع ونهايته.\n"
             "• <b>اختبار المايكروفون قبل التسجيل:</b> زر داخل نافذة المسجّل يسجّل عشر ثوانٍ ثم يخبرك <b>نصًّا مقروءًا "
             "لقارئ الشاشة</b> هل المستوى ممتاز أم مرتفع أم منخفض أم لا يصل صوت أصلًا، مع خطوات الإصلاح. هذا يغنيك عن مؤشّر "
             "المستوى المرئي الذي لا يفيد من لا يرى.\n"
@@ -312,6 +321,14 @@ def build_user_guide_html(tr, seek_kwargs: dict = None) -> str:
             "window, supporting batch folder organization.\n"
             "• <b>Audio Recorder:</b> Built-in tool for high-quality audio recording, started and stopped with "
             "<code>Ctrl+R</code>.\n"
+            "• <b>Media Editor:</b> cuts and merges audio and video files, from the Tools menu or <code>Ctrl+Shift+X</code>. Split a file in two, split "
+            "several files at the same time in one go, take scattered parts of a long file into one file, or merge files "
+            "in the order you choose. The result keeps the original format, and the «Current Position» "
+            "button takes the time from the player while you listen. Video has two modes: «Fast, same quality» "
+            "starts the cut at the nearest keyframe (a full picture every few seconds), and «Exact to the second» "
+            "cuts at the exact time but is slower. Merged videos must share the same format and size. "
+            "Easiest way: press <code>Ctrl+B</code> at each spot while listening, then in the editor pick a time "
+            "«From Bookmarks», or press «Parts from Bookmarks» so every two bookmarks become a part's start and end.\n"
             "• <b>Microphone test:</b> records ten seconds and tells you <b>in text your screen reader can read</b> "
             "whether the level is good, too high, too low, or silent — along with how to fix it.\n"
             "• <b>Hear your level while recording:</b> press <code>Ctrl+L</code> at any time during a recording.\n"

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-فتح النوافذ والأدوات: الخيارات، حول، الدليل، المسجّل، المحول،
+فتح النوافذ والأدوات: الخيارات، حول، الدليل، المسجّل، المحول، القص والدمج،
     وتصدير/استيراد الإعدادات والتقرير التشخيصي.
 
     الاستيرادات جوّه التوابع مقصودة - دي اللي خلّت الإقلاع ينزل
@@ -191,6 +191,39 @@ class ToolsMixin:
             self._quick_record_dialog.Bind(wx.EVT_CLOSE, self._on_quick_record_dialog_closed)
         self._quick_record_dialog.Show()
         self._quick_record_dialog.Raise()
+
+    def _on_media_editor(self, event):
+        # نافذة مستقلة في نفس العملية، مثل المسجّل: القص والدمج نسخ مباشر
+        # سريع في خيط خلفي، ولا يحتاج عملية منفصلة كالمحوّل. القص الدقيق
+        # للفيديو وحده يعيد الترميز، وهو أيضًا في الخيط الخلفي.
+        # والملف المفتوح في المشغّل يُوضع فيها جاهزًا، وزر «الموضع
+        # الحالي» يقرأ موضع التشغيل منها.
+        # (الاستيراد متأخر؛ انظر رأس الملف)
+        from core.streams import is_stream_url
+        from gui.media_editor_dialog import MediaEditorDialog
+
+        dialog = getattr(self, "_media_editor_dialog", None)
+        if dialog:
+            dialog.Show()
+            dialog.Raise()
+            return
+
+        current = self._current_file_path
+        if current and (is_stream_url(current) or not os.path.isfile(current)):
+            current = None
+
+        def position_provider():
+            path = self._current_file_path
+            if not path or is_stream_url(path):
+                return None
+            return path, self.engine.get_current_position()
+
+        dialog = MediaEditorDialog(self.tr, initial_path=current, position_provider=position_provider,
+                                   bookmarks_provider=self.settings.get_bookmark_entries)
+        dialog.announcer = ScreenReaderAnnouncer(dialog)
+        self._media_editor_dialog = dialog
+        dialog.Show()
+        dialog.Raise()
 
     def _on_converter(self, event):
         self._launch_standalone_converter()

@@ -42,10 +42,18 @@ def parse_time(text: str) -> float:
         raise TimeParseError("أجزاء كتير")
 
     values = []
-    for part in parts:
+    fraction = 0.0
+    for index, part in enumerate(parts):
         part = part.strip()
         if not part:
             part = "0"
+        # كسر الثانية مسموح في الجزء الأخير فقط (1:30.5)، للقص الدقيق
+        if index == len(parts) - 1 and part.count(".") == 1:
+            whole, _, decimals = part.partition(".")
+            if not (whole or "0").isdigit() or not decimals.isdigit():
+                raise TimeParseError(f"جزء غير رقمي: {part!r}")
+            fraction = float("0." + decimals)
+            part = whole or "0"
         if not part.isdigit():
             raise TimeParseError(f"جزء غير رقمي: {part!r}")
         values.append(int(part))
@@ -63,7 +71,7 @@ def parse_time(text: str) -> float:
             raise TimeParseError("الدقائق والثواني لازم تقل عن 60")
         seconds = hours * 3600 + minutes * 60 + secs
 
-    return float(seconds)
+    return seconds + fraction
 
 
 def format_time_for_input(seconds: float) -> str:
@@ -74,3 +82,11 @@ def format_time_for_input(seconds: float) -> str:
     if hours:
         return f"{hours}:{minutes:02d}:{secs:02d}"
     return f"{minutes}:{secs:02d}"
+
+
+def format_time_precise(seconds: float) -> str:
+    """مثل format_time_for_input مع عُشر الثانية إن وُجد (1:30.5)، للقص."""
+    tenths = int(round(max(0.0, seconds) * 10))
+    whole, tenth = divmod(tenths, 10)
+    text = format_time_for_input(whole)
+    return f"{text}.{tenth}" if tenth else text

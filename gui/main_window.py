@@ -686,6 +686,7 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin,
         tools_menu.AppendSeparator()
         converter_item = tools_menu.Append(wx.ID_ANY, self.tr.t("menu_converter"))
         recorder_item = tools_menu.Append(wx.ID_ANY, f"{self.tr.t('menu_recorder')}\tCtrl+Shift+R")
+        media_editor_item = tools_menu.Append(wx.ID_ANY, f"{self.tr.t('menu_media_editor')}\tCtrl+Shift+X")
 
         tools_menu.AppendSeparator()
         sleep_timer_item = tools_menu.Append(wx.ID_ANY, self.tr.t("menu_sleep_timer"))
@@ -728,6 +729,7 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin,
         self.Bind(wx.EVT_MENU, self._on_export_shortcuts_doc, export_shortcuts_item)
         self.Bind(wx.EVT_MENU, self._on_converter, converter_item)
         self.Bind(wx.EVT_MENU, self._on_recorder, recorder_item)
+        self.Bind(wx.EVT_MENU, self._on_media_editor, media_editor_item)
         self.Bind(wx.EVT_MENU, lambda e: self._change_speed(0.25), speed_increase_item)
         self.Bind(wx.EVT_MENU, lambda e: self._change_speed(-0.25), speed_decrease_item)
         self.Bind(wx.EVT_MENU, lambda e: self._reset_speed(), speed_reset_item)
@@ -1430,6 +1432,7 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin,
 
         bind(wx.ACCEL_CTRL | wx.ACCEL_SHIFT, ord("R"), self._on_recorder)
         bind(wx.ACCEL_CTRL, ord("R"), self._on_start_recording_shortcut)
+        bind(wx.ACCEL_CTRL | wx.ACCEL_SHIFT, ord("X"), self._on_media_editor)
 
         bind(wx.ACCEL_CTRL | wx.ACCEL_SHIFT, ord("P"), self._on_options)
 
