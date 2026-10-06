@@ -1037,10 +1037,9 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin,
         self._announce(self.tr.t("announce_muted" if muted else "announce_unmuted"), "announce_mute_toggle")
 
     def _on_announce_time_status(self, event):
+        # الوقت الحالي وحده: المتبقي له R والمدة الكاملة لها E
         current = self.engine.get_current_position()
-        total = self.engine.duration
-        remaining = max(0.0, total - current)
-        message = self.tr.t("announce_time_status", current=format_time(current), total=format_time(total), remaining=format_time(remaining))
+        message = self.tr.t("announce_time_status", current=format_time(current))
         self.status_bar.SetStatusText(message)
         self._announce_debounced(message, "announce_time_status")
 
