@@ -55,6 +55,7 @@ arabic.MenuConvert=تحويل بواسطة مشغل الوسائط الشامل
 arabic.MenuConvertDir=تحويل المجلد بواسطة مشغل الوسائط الشامل
 arabic.MediaFileDesc=ملف وسائط (مشغل الوسائط الشامل)
 arabic.WarmingUp=جاري تجهيز محرك التشغيل لأول استخدام...
+arabic.DeleteUserData=هل تريد حذف إعداداتك أيضًا؟%n%nيشمل ذلك العلامات المرجعية، ومواضع الاستئناف، والسرعة المحفوظة لكل ملف، والسجل.%n%nاختر «لا» إن كنت ستثبّت البرنامج مرة أخرى، فتجد كل شيء كما تركته.
 
 english.AppName=Universal Media Player
 english.AppDesc=Accessible and easy-to-use media player for screen readers
@@ -63,6 +64,7 @@ english.MenuConvert=Convert with Universal Media Player
 english.MenuConvertDir=Convert folder with Universal Media Player
 english.MediaFileDesc=Universal Media Player Media File
 english.WarmingUp=Preparing the playback engine for first use...
+english.DeleteUserData=Do you also want to delete your settings?%n%nThis includes bookmarks, resume positions, the saved speed of each file, and the log.%n%nChoose "No" if you will install the program again, so you find everything as you left it.
 ; =========================================================
 
 [Files]
@@ -84,12 +86,10 @@ Name: "{autodesktop}\{cm:AppName}"; Filename: "{app}\{#MyAppExeName}"
 ; ---------------------------------------------------------------------
 ; --- مسح جذري لكل متعلقات البرنامج عند الإزالة (Clean Uninstall) ---
 ; ---------------------------------------------------------------------
-; 1. مسح مجلد الإعدادات (AppData) الخاص بالبرنامج بما يحتويه من ملفات json وسجلات
-;    البرنامج من 1.4.0 بيحفظ في Omnya (شوف core/logging_setup.py)، وOmniaPlayer
-;    هو الاسم القديم لو لسه ما اتنقلش
-Type: filesandordirs; Name: "{userappdata}\Omnya"
-Type: filesandordirs; Name: "{userappdata}\OmniaPlayer"
-; 2. مسح مجلد تثبيت البرنامج (Program Files) بالكامل في حال تبقت فيه ملفات تم إنشاؤها بعد التثبيت
+; مجلد الإعدادات (AppData) لا يُمسح هنا: الإزالة تسأل المستخدم أولًا
+; (شوف CurUninstallStepChanged). كان يُمسح بلا سؤال، فمن يزيل البرنامج ليعيد
+; تثبيته يفقد إعداداته وعلاماته ومواضع الاستئناف كلها
+; مسح مجلد تثبيت البرنامج (Program Files) بالكامل في حال تبقت فيه ملفات تم إنشاؤها بعد التثبيت
 Type: filesandordirs; Name: "{app}"
 
 [Code]
@@ -210,6 +210,18 @@ var
   ExtString, Ext: String;
   P: Integer;
 begin
+  { إعدادات المستخدم بعد إزالة البرنامج، وبسؤاله: الافتراضي «لا»، والإزالة
+    الصامتة تحتفظ بها. البرنامج من 1.4.0 يحفظ في Omnya، وOmniaPlayer اسمه القديم }
+  if CurUninstallStep = usPostUninstall then
+  begin
+    if (not UninstallSilent) and
+       (SuppressibleMsgBox(CustomMessage('DeleteUserData'), mbConfirmation, MB_YESNO or MB_DEFBUTTON2, IDNO) = IDYES) then
+    begin
+      DelTree(ExpandConstant('{userappdata}\Omnya'), True, True, True);
+      DelTree(ExpandConstant('{userappdata}\OmniaPlayer'), True, True, True);
+    end;
+  end;
+
   if CurUninstallStep = usUninstall then
   begin
     { إزالة جميع مفاتيح البرنامج من مسارات الريجيستري الرئيسية للمستخدم والنظام }
