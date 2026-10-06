@@ -62,12 +62,19 @@ def _write_path_list_if_needed(command, paths):
 class ToolsMixin:
     """فتح النوافذ والأدوات: الخيارات، حول، الدليل، المسجّل، المحول،"""
 
-    def _on_options(self, event):
+    def _open_editor_options(self):
+        """زر «إعدادات المحرر» يفتح الخيارات على تبويب محرر الوسائط."""
+        from gui.dialogs import OptionsDialog
+        self._on_options(None, initial_tab=OptionsDialog.EDITOR_TAB)
+
+    def _on_options(self, event, initial_tab=None):
         # استيراد متأخر: نافذة الخيارات لا تُحتاج عند الإقلاع
         # (انظر رأس الملف)
         from gui.dialogs import OptionsDialog
 
         dialog = OptionsDialog(self, self.tr, self.settings)
+        if initial_tab is not None:
+            dialog.select_tab(initial_tab)
         try:
             if dialog.ShowModal() == wx.ID_OK:
                 if dialog.apply_to_settings():
@@ -78,6 +85,10 @@ class ToolsMixin:
                 self._bind_shortcuts()
                 self.seek_slider.SetHelpText(self._format_seek_help_text())
                 self._refresh_global_media_keys()
+                self.reload_editor_hotkeys()
+                editor = getattr(self, "_media_editor_dialog", None)
+                if editor:
+                    editor.apply_settings()
                 self._apply_ui_theme()
                 self._announce(self.tr.t("options_saved_announcement"))
         finally: dialog.Destroy()
@@ -91,6 +102,16 @@ class ToolsMixin:
         try: dialog.ShowModal()
         finally: dialog.Destroy()
 
+    def _shortcuts_kwargs(self):
+        """ما ضبطه المستخدم من مقادير التقديم والاختصارات الشبحية، للدليل والتصدير."""
+        from gui.editor_hotkeys import current_hotkeys
+
+        return {
+            "seek_steps": {kind: self.settings.get_seek_step(kind)
+                           for kind in self.settings.SEEK_STEP_DEFAULTS},
+            "ghost_hotkeys": current_hotkeys(self.settings),
+        }
+
     def _on_user_guide(self, event):
         import webbrowser
 
@@ -99,7 +120,8 @@ class ToolsMixin:
         guide_path = os.path.join(get_app_data_dir(), f"user_guide_{self.tr.lang}.html")
         try:
             with open(guide_path, "w", encoding="utf-8") as f:
-                f.write(build_user_guide_html(self.tr, self._seek_duration_kwargs()))
+                f.write(build_user_guide_html(self.tr, self._seek_duration_kwargs(),
+                                              self._shortcuts_kwargs()))
         except OSError as e:
             wx.MessageBox(str(e), self.tr.t("menu_user_guide"), wx.ICON_ERROR)
             return
@@ -114,7 +136,7 @@ class ToolsMixin:
             path = dlg.GetPath()
         if not path.lower().endswith(".txt"): path += ".txt"
         header = self.tr.t("shortcuts_header", app_name=self.tr.t("app_title"))
-        shortcuts_list = get_shortcuts_list(getattr(self.tr, "lang", "ar"))
+        shortcuts_list = get_shortcuts_list(getattr(self.tr, "lang", "ar"), **self._shortcuts_kwargs())
         try:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(header + "\n" + "=" * len(header) + "\n\n")
@@ -193,6 +215,11 @@ class ToolsMixin:
         self._quick_record_dialog.Raise()
 
     def _on_media_editor(self, event):
+        dialog = self._ensure_media_editor()
+        dialog.Show()
+        dialog.Raise()
+
+    def _ensure_media_editor(self, load_current=True):
         # نافذة مستقلة في نفس العملية، مثل المسجّل: القص والدمج نسخ مباشر
         # سريع في خيط خلفي، ولا يحتاج عملية منفصلة كالمحوّل. القص الدقيق
         # للفيديو وحده يعيد الترميز، وهو أيضًا في الخيط الخلفي.
@@ -202,13 +229,13 @@ class ToolsMixin:
         from core.streams import is_stream_url
         from gui.media_editor_dialog import MediaEditorDialog
 
+        # الاختصارات الشبحية تنشئه مخفيًّا، والإغلاق يخفيه ولا يهدمه، فما
+        # حدده المستخدم وهو يسمع يبقى (انظر gui/editor_hotkeys.py)
         dialog = getattr(self, "_media_editor_dialog", None)
         if dialog:
-            dialog.Show()
-            dialog.Raise()
-            return
+            return dialog
 
-        current = self._current_file_path
+        current = self._current_file_path if load_current else None
         if current and (is_stream_url(current) or not os.path.isfile(current)):
             current = None
 
@@ -219,11 +246,14 @@ class ToolsMixin:
             return path, self.engine.get_current_position()
 
         dialog = MediaEditorDialog(self.tr, initial_path=current, position_provider=position_provider,
-                                   bookmarks_provider=self.settings.get_bookmark_entries)
+                                   bookmarks_provider=self.settings.get_bookmark_entries,
+                                   hotkeys_enabled=self.settings.get_enable_editor_hotkeys(),
+                                   on_hotkeys_toggled=self.set_editor_hotkeys_enabled,
+                                   hide_on_close=True, settings=self.settings,
+                                   on_open_settings=self._open_editor_options)
         dialog.announcer = ScreenReaderAnnouncer(dialog)
         self._media_editor_dialog = dialog
-        dialog.Show()
-        dialog.Raise()
+        return dialog
 
     def _on_converter(self, event):
         self._launch_standalone_converter()

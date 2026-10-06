@@ -3,6 +3,7 @@ import contextlib
 import json
 import logging
 import os
+import threading
 
 from core import equalizer
 from core.logging_setup import get_app_data_dir, get_documents_dir
@@ -24,6 +25,10 @@ _DEFAULT_PLAYBACK_SPEED = 1.0
 _DEFAULT_SLEEP_TIMER_MINUTES = 30
 
 
+# حسم المجلدات مرة واحدة حتى لو طُلبت من خيطين معًا (خيط النقل عند البدء والواجهة)
+_OUTPUT_FOLDERS_LOCK = threading.Lock()
+
+
 class Settings:
     def __init__(self, path: str = None):
         self._path = path or os.path.join(get_app_data_dir(), _SETTINGS_FILENAME)
@@ -39,6 +44,8 @@ class Settings:
             "enable_folder_navigation": True,
             "enable_completion_sound": True,
             "enable_global_media_keys": True,
+            # اختصارات محرر الوسائط العامة (gui/editor_hotkeys.py)
+            "enable_editor_hotkeys": True,
             "ui_theme": "standard",
             "on_playback_ended_action": "next_file",
 
@@ -338,6 +345,13 @@ class Settings:
         self._data["enable_global_media_keys"] = bool(enabled)
         self.save()
 
+    def get_enable_editor_hotkeys(self) -> bool:
+        return bool(self._data.get("enable_editor_hotkeys", True))
+
+    def set_enable_editor_hotkeys(self, enabled: bool):
+        self._data["enable_editor_hotkeys"] = bool(enabled)
+        self.save()
+
     _VALID_UI_THEMES = ("standard", "high_contrast", "dark", "light")
     def get_ui_theme(self) -> str:
         value = self._data.get("ui_theme", "dark")
@@ -476,6 +490,71 @@ class Settings:
         if isinstance(profiles, dict) and device_name in profiles:
             del profiles[device_name]
             self.save()
+
+    # ------------------------------------------------------------------ #
+    # مقدار التقديم والإرجاع لكل نوع (الأسهم وحدها، ومع Ctrl وShift وAlt
+    # وCtrl+Shift)، بالثواني دائمًا؛ الواجهة تعرض بعضها بالدقائق
+    # ------------------------------------------------------------------ #
+    SEEK_STEP_DEFAULTS = {"normal": 10, "ctrl": 60, "shift": 300, "alt": 600, "ctrl_shift": 1800}
+    # (أقل قيمة، أكبر قيمة) بالثواني
+    SEEK_STEP_LIMITS = {"normal": (1, 600), "ctrl": (1, 3600), "shift": (60, 7200),
+                        "alt": (60, 7200), "ctrl_shift": (60, 14400)}
+
+    def get_seek_step(self, kind: str) -> int:
+        default = self.SEEK_STEP_DEFAULTS[kind]
+        low, high = self.SEEK_STEP_LIMITS[kind]
+        try:
+            value = int(self._data.get(f"seek_step_{kind}", default))
+        except (TypeError, ValueError):
+            return default
+        return value if low <= value <= high else default
+
+    def set_seek_step(self, kind: str, seconds: int):
+        low, high = self.SEEK_STEP_LIMITS[kind]
+        try:
+            seconds = int(seconds)
+        except (TypeError, ValueError):
+            seconds = self.SEEK_STEP_DEFAULTS[kind]
+        self._data[f"seek_step_{kind}"] = max(low, min(high, seconds))
+        self.save()
+
+    # ------------------------------------------------------------------ #
+    # محرر الوسائط
+    # ------------------------------------------------------------------ #
+    _VALID_EDITOR_PROGRESS_STEPS = (0, 10, 25, 50)
+
+    def get_editor_video_precise(self) -> bool:
+        """طريقة قص الفيديو التي تبدأ بها النافذة: الدقيق أو السريع."""
+        return bool(self._data.get("editor_video_precise", False))
+
+    def set_editor_video_precise(self, precise: bool):
+        self._data["editor_video_precise"] = bool(precise)
+        self.save()
+
+    def get_editor_progress_step(self) -> int:
+        """كل كم في المئة يُعلن التقدم؛ الصفر يعني لا إعلان أثناء العمل."""
+        try:
+            value = int(self._data.get("editor_progress_step", 25))
+        except (TypeError, ValueError):
+            return 25
+        return value if value in self._VALID_EDITOR_PROGRESS_STEPS else 25
+
+    def set_editor_progress_step(self, step: int):
+        self._data["editor_progress_step"] = step if step in self._VALID_EDITOR_PROGRESS_STEPS else 25
+        self.save()
+
+    def get_editor_hotkey(self, action: str):
+        """(المفاتيح المساعدة، المفتاح) المحفوظان لاختصار شبحي، أو None للافتراضي."""
+        value = self._data.get(f"editor_hotkey_{action}")
+        if isinstance(value, (list, tuple)) and len(value) == 2 and all(isinstance(v, str) for v in value):
+            return tuple(value)
+        return None
+
+    def set_editor_hotkeys(self, mapping: dict):
+        """يحفظ كل الاختصارات الشبحية مرة واحدة: {الفعل: (المساعدة، المفتاح)}."""
+        for action, combo in mapping.items():
+            self._data[f"editor_hotkey_{action}"] = list(combo)
+        self.save()
 
     def get_announce_seek_min_seconds(self) -> int:
         try:
@@ -617,12 +696,36 @@ class Settings:
         self._data["recorder_default_channels"] = int(channels)
         self.save()
 
+    _VALID_BIT_DEPTHS = (16, 24, 32)
+
     def get_recorder_default_bit_depth(self) -> int:
-        value = int(self._data.get("recorder_default_bit_depth", 16))
-        return 32 if value == 32 else 16
+        try:
+            value = int(self._data.get("recorder_default_bit_depth", 16))
+        except (TypeError, ValueError):
+            return 16
+        return value if value in self._VALID_BIT_DEPTHS else 16
 
     def set_recorder_default_bit_depth(self, bit_depth: int):
-        self._data["recorder_default_bit_depth"] = 32 if int(bit_depth) == 32 else 16
+        bit_depth = int(bit_depth)
+        self._data["recorder_default_bit_depth"] = bit_depth if bit_depth in self._VALID_BIT_DEPTHS else 16
+        self.save()
+
+    # تحسين صوت المايكروفون (core/voice_enhance.py) والوضع الحصري لكرت الصوت
+    _VALID_ENHANCE_LEVELS = ("off", "clean", "denoise")
+
+    def get_recorder_enhance_level(self) -> str:
+        value = self._data.get("recorder_enhance_level", "clean")
+        return value if value in self._VALID_ENHANCE_LEVELS else "clean"
+
+    def set_recorder_enhance_level(self, level: str):
+        self._data["recorder_enhance_level"] = level if level in self._VALID_ENHANCE_LEVELS else "clean"
+        self.save()
+
+    def get_recorder_exclusive(self) -> bool:
+        return bool(self._data.get("recorder_exclusive", True))
+
+    def set_recorder_exclusive(self, enabled: bool):
+        self._data["recorder_exclusive"] = bool(enabled)
         self.save()
 
     def get_recorder_default_format(self) -> str:
@@ -649,44 +752,187 @@ class Settings:
     # ------------------------------------------------------------------ #
     # مجلدات الحفظ الافتراضية
     # ------------------------------------------------------------------ #
-    def _localized_folder_name(self, translation_key: str) -> str:
-        lang_strings = STRINGS.get(self.get_language(), STRINGS["ar"])
-        return lang_strings.get(translation_key, translation_key)
+    # المجلدات بلغة البرنامج وقت إنشائها أول مرة، ثم تُحفظ ولا تتغير أبدًا
+    # (output_folders في الإعدادات). تغيير الاسم مع كل تغيير للغة كان سيكسر
+    # العلامات ومواضع الاستكمال وقوائم التشغيل المحفوظة (مساراتها كاملة)،
+    # ويفشل في منتصفه لو ملف مفتوح؛ وتبعيتها للغة في الإصدارات السابقة
+    # صنعت نسخًا مكررة («تسجيلات صوتية» و«Voice Recordings»)
+    OUTPUT_FOLDER_NAMES = {
+        "ar": {
+            "root": "مشغل الوسائط الشامل - Omnya",
+            "recordings": ("التسجيلات",),
+            "converted": ("الملفات المحولة",),
+            "editor_audio": ("محرر الوسائط", "صوت"),
+            "editor_video": ("محرر الوسائط", "فيديو"),
+        },
+        "en": {
+            "root": "Universal Media Player",
+            "recordings": ("Recordings",),
+            "converted": ("Converted Files",),
+            "editor_audio": ("Media Editor", "Audio"),
+            "editor_video": ("Media Editor", "Video"),
+        },
+    }
+    OUTPUT_KINDS = ("recordings", "converted", "editor_audio", "editor_video")
 
-    # اسم المجلد الرئيسي ثابت لا يتبع لغة الواجهة: تغيير اللغة كان بيفتح
-    # مجلدًا جديدًا ويسيب ملفات المستخدم في القديم
-    APP_FOLDER_NAME = "مشغل الوسائط الشامل - Omnya"
+    # المجلد الرئيسي للإصدارات السابقة: من وُجد عنده يكمل فيه كما هو
+    LEGACY_APP_FOLDER = "مشغل الوسائط الشامل - Omnya"
+    # مجلدات الإصدارات السابقة الفرعية؛ ما فيها يُنقل للجديدة مرة واحدة
+    LEGACY_OUTPUT_FOLDERS = {
+        "recordings": ("تسجيلات صوتية", "Voice Recordings"),
+        "converted": ("ملفات محوّلة", "Converted Files"),
+    }
+    # مجلدات رئيسية صنعها المحوّل بالخطأ في إصدارات سابقة (بلا «- Omnya»)
+    STRAY_APP_FOLDERS = ("مشغل الوسائط الشامل", "Universal Media Player")
 
-    def _default_output_folder(self, translation_key: str) -> str:
-        return os.path.join(
-            get_documents_dir(),
-            self.APP_FOLDER_NAME,
-            self._localized_folder_name(translation_key),
-        )
+    def _known_folder_names(self):
+        names = set()
+        for table in self.OUTPUT_FOLDER_NAMES.values():
+            for kind in self.OUTPUT_KINDS:
+                names.update(table[kind])
+        for legacy in self.LEGACY_OUTPUT_FOLDERS.values():
+            names.update(legacy)
+        return names
 
-    def get_converter_output_folder(self) -> str:
-        folder = self._data.get("converter_output_folder")
-        if not folder:
-            folder = self._default_output_folder("folder_name_converted_files")
+    def _is_our_folder(self, path):
+        """
+        مجلد صنعه البرنامج: كل ما فيه مجلدات بأسماء مجلداته.
+
+        «Universal Media Player» في المستندات قد يكون مجلدًا للمستخدم لا
+        علاقة له بالبرنامج (على جهاز التطوير هو مجلد المشروع نفسه)؛ فيه
+        أي شيء آخر يعني أنه ليس لنا، فلا يُمس ويأخذ مجلدنا رقمًا.
+        """
+        try:
+            entries = os.listdir(path)
+        except OSError:
+            return False
+        known = self._known_folder_names()
+        return all(name in known and os.path.isdir(os.path.join(path, name)) for name in entries)
+
+    def resolve_output_folders(self) -> dict:
+        """
+        المجلد الرئيسي وأسماء الفرعية، تُحسم أول مرة وتُحفظ.
+
+        بلغة البرنامج ساعتها. من عنده مجلد الإصدارات السابقة يكمل فيه. ولو
+        الاسم مأخوذ بمجلد ليس للبرنامج يُضاف رقم: «Universal Media Player 1».
+        """
+        with _OUTPUT_FOLDERS_LOCK:
+            stored = self._data.get("output_folders")
+            if isinstance(stored, dict) and isinstance(stored.get("root"), str) and all(
+                    isinstance(stored.get(kind), list) and stored[kind] for kind in self.OUTPUT_KINDS):
+                return stored
+
+            names = self.OUTPUT_FOLDER_NAMES["en" if self.get_language() == "en" else "ar"]
+            documents = get_documents_dir()
+            legacy = os.path.join(documents, self.LEGACY_APP_FOLDER)
+            if os.path.isdir(legacy):
+                root = legacy
+            else:
+                base = os.path.join(documents, names["root"])
+                root, number = base, 1
+                while os.path.exists(root) and not self._is_our_folder(root):
+                    root = f"{base} {number}"
+                    number += 1
+            resolved = {"root": root}
+            resolved.update({kind: list(names[kind]) for kind in self.OUTPUT_KINDS})
+            self._data["output_folders"] = resolved
+            self.save()
+            return resolved
+
+    def _default_output_folder(self, kind: str) -> str:
+        resolved = self.resolve_output_folders()
+        return os.path.join(resolved["root"], *resolved[kind])
+
+    def _legacy_roots(self):
+        """المجلدات الرئيسية التي قد تحوي مجلدات الإصدارات السابقة."""
+        documents = get_documents_dir()
+        roots = [os.path.join(documents, self.LEGACY_APP_FOLDER)]
+        for name in self.STRAY_APP_FOLDERS:
+            path = os.path.join(documents, name)
+            if os.path.isdir(path) and self._is_our_folder(path):
+                roots.append(path)
+        return roots
+
+    def _is_legacy_default(self, folder: str, kind: str) -> bool:
+        """مجلد محفوظ هو افتراضي قديم لا اختيار من المستخدم."""
+        wanted = os.path.normcase(os.path.normpath(folder))
+        return any(wanted == os.path.normcase(os.path.normpath(os.path.join(root, name)))
+                   for root in self._legacy_roots()
+                   for name in self.LEGACY_OUTPUT_FOLDERS.get(kind, ()))
+
+    def _output_folder(self, setting_key: str, kind: str) -> str:
+        folder = self._data.get(setting_key)
+        if not folder or self._is_legacy_default(folder, kind):
+            folder = self._default_output_folder(kind)
         try:
             os.makedirs(folder, exist_ok=True)
         except OSError:
             pass
         return folder
+
+    def get_editor_output_folder(self, is_video: bool) -> str:
+        """مجلد محرر الوسائط: «صوت» أو «فيديو» حسب الملف."""
+        folder = self._default_output_folder("editor_video" if is_video else "editor_audio")
+        try:
+            os.makedirs(folder, exist_ok=True)
+        except OSError:
+            pass
+        return folder
+
+    def migrate_legacy_output_folders(self) -> int:
+        """
+        ينقل ما في مجلدات الإصدارات السابقة إلى المجلدات الحالية، مرة واحدة.
+
+        الملف لا يُكتب فوق ملف بنفس الاسم: يأخذ رقمًا. والمجلد القديم
+        يُحذف فقط لو فرغ تمامًا، وكذلك المجلد الرئيسي الذي صنعه المحوّل
+        بالخطأ. يرجع عدد ما نُقل.
+        """
+        current_root = os.path.normcase(os.path.normpath(self.resolve_output_folders()["root"]))
+        moved = 0
+        roots = self._legacy_roots()
+        for kind, names in self.LEGACY_OUTPUT_FOLDERS.items():
+            target = self._default_output_folder(kind)
+            for root in roots:
+                for name in names:
+                    old = os.path.join(root, name)
+                    if not os.path.isdir(old) or os.path.normcase(os.path.normpath(old)) == \
+                            os.path.normcase(os.path.normpath(target)):
+                        continue
+                    try:
+                        os.makedirs(target, exist_ok=True)
+                        for entry in os.listdir(old):
+                            destination = os.path.join(target, entry)
+                            base, ext = os.path.splitext(entry)
+                            counter = 2
+                            while os.path.exists(destination):
+                                destination = os.path.join(target, f"{base} ({counter}){ext}")
+                                counter += 1
+                            os.replace(os.path.join(old, entry), destination)
+                            moved += 1
+                        os.rmdir(old)
+                    except OSError:
+                        # ملف مفتوح في برنامج آخر مثلًا: يبقى، وتُعاد المحاولة
+                        # في المرة القادمة
+                        continue
+        for root in roots:
+            if os.path.normcase(os.path.normpath(root)) == current_root:
+                continue
+            try:
+                if not os.listdir(root):
+                    os.rmdir(root)
+            except OSError:
+                pass
+        return moved
+
+    def get_converter_output_folder(self) -> str:
+        return self._output_folder("converter_output_folder", "converted")
 
     def set_converter_output_folder(self, folder: str):
         self._data["converter_output_folder"] = folder
         self.save()
 
     def get_recorder_output_folder(self) -> str:
-        folder = self._data.get("recorder_output_folder")
-        if not folder:
-            folder = self._default_output_folder("folder_name_voice_recordings")
-        try:
-            os.makedirs(folder, exist_ok=True)
-        except OSError:
-            pass
-        return folder
+        return self._output_folder("recorder_output_folder", "recordings")
 
     def set_recorder_output_folder(self, folder: str):
         self._data["recorder_output_folder"] = folder
@@ -887,3 +1133,8 @@ class Settings:
         self._data.update(loaded)
         self.save()
         return True
+
+
+def default_output_folder(kind: str) -> str:
+    """مسار مجلد حفظ من إعدادات المستخدم: recordings أو converted أو editor_audio أو editor_video."""
+    return Settings()._default_output_folder(kind)

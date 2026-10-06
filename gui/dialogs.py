@@ -9,6 +9,22 @@ from core.version import APP_VERSION
 from i18n.plural import count_phrase
 from gui.audio_bitrate_widget import current_audio_bitrate_bps, refresh_audio_bitrate_choice
 from gui.dialog_helpers import bind_escape_closes, bind_space_like_enter
+from core.audio_recorder import SUPPORTED_BIT_DEPTHS
+from core.voice_enhance import ENHANCE_LEVELS
+from gui.value_choice import (
+    RECENT_FILES_COUNTS,
+    VIDEO_BITRATES_KBPS,
+    ValueChoice,
+)
+from gui.editor_hotkeys import (
+    ACTIONS as EDITOR_HOTKEY_ACTIONS,
+    DEFAULT_HOTKEYS as EDITOR_DEFAULT_HOTKEYS,
+    KEY_CHOICES as EDITOR_KEY_CHOICES,
+    MODIFIER_CHOICES as EDITOR_MODIFIER_CHOICES,
+    combo_text,
+    current_hotkeys,
+    find_duplicates,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -238,7 +254,28 @@ class AboutDialog(wx.Dialog):
         bind_escape_closes(self)
 
 
+# مقادير التقديم: (النوع، مفتاح العنوان، المقادير المتاحة بالثواني)
+_SEEK_STEP_ROWS = (
+    ("normal", "options_seek_step_normal", (1, 2, 3, 5, 10, 15, 20, 30, 45, 60)),
+    ("ctrl", "options_seek_step_ctrl", (15, 20, 30, 45, 60, 90, 120, 180, 300, 600)),
+    ("shift", "options_seek_step_shift", (60, 120, 180, 300, 600, 900, 1200, 1800)),
+    ("alt", "options_seek_step_alt", (60, 120, 300, 600, 900, 1200, 1800, 2700, 3600)),
+    ("ctrl_shift", "options_seek_step_ctrl_shift", (300, 600, 900, 1200, 1800, 2700, 3600, 5400, 7200)),
+)
+
+
+def _seek_amount_text(tr, seconds):
+    """«10 ثوانٍ» أو «5 دقائق»: المقدار بوحدته، كما يُقرأ."""
+    if seconds >= 60 and seconds % 60 == 0:
+        return count_phrase(tr, "count_minutes", seconds // 60)
+    return count_phrase(tr, "count_seconds", seconds)
+_EDITOR_PROGRESS_STEPS = (10, 25, 50, 0)
+
+
 class OptionsDialog(wx.Dialog):
+    # رقم تبويب محرر الوسائط؛ زر «إعدادات المحرر» يفتح الخيارات عليه
+    EDITOR_TAB = 5
+
     def __init__(self, parent, tr, settings):
         super().__init__(parent, title=tr.t("options_dialog_title"), style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
         self.tr = tr
@@ -274,6 +311,7 @@ class OptionsDialog(wx.Dialog):
         accessibility_panel = _scrollable_tab()
         converter_panel = _scrollable_tab()
         recorder_panel = _scrollable_tab()
+        editor_panel = _scrollable_tab()
 
         # ---------------- 1. تبويب عام ----------------
         general_sizer = wx.BoxSizer(wx.VERTICAL)
@@ -294,7 +332,7 @@ class OptionsDialog(wx.Dialog):
 
         recent_box = _add_group_box(panel, general_sizer, tr.t("options_max_recent_label"))
         max_recent = _safe_get_setting(settings, "max_recent_files", 10)
-        self.max_recent_spin = wx.SpinCtrl(panel, min=3, max=50, initial=max_recent)
+        self.max_recent_spin = ValueChoice(panel, RECENT_FILES_COUNTS, initial=max_recent)
         self.max_recent_spin.SetName(tr.t("options_max_recent_label"))
         recent_box.Add(self.max_recent_spin, flag=wx.LEFT | wx.RIGHT | wx.TOP | wx.BOTTOM, border=8)
 
@@ -365,6 +403,28 @@ class OptionsDialog(wx.Dialog):
         on_ended_row.Add(on_ended_label, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=8)
         on_ended_row.Add(self.on_playback_ended_choice)
         resume_nav_box.Add(on_ended_row, flag=wx.LEFT | wx.RIGHT | wx.TOP | wx.BOTTOM, border=8)
+
+        # لكل نوع تقديم قائمة بمقادير جاهزة، كل منها مكتوب بوحدته (ثوانٍ أو
+        # دقائق)، بلا خانة كتابة
+        seek_box = _add_group_box(panel, playback_nav_sizer, tr.t("options_seek_steps_section"))
+        _add_hint(panel, seek_box, tr.t("options_seek_steps_hint"))
+        self.seek_step_choices = {}
+        for kind, label_key, amounts in _SEEK_STEP_ROWS:
+            current = settings.get_seek_step(kind)
+            # مقدار محفوظ من قبل ليس في القائمة يبقى ظاهرًا ولا يضيع
+            amounts = tuple(sorted(set(amounts) | {current}))
+            row = wx.BoxSizer(wx.HORIZONTAL)
+            label = wx.StaticText(panel, label=tr.t(label_key))
+            choice = wx.Choice(panel, choices=[_seek_amount_text(tr, a) for a in amounts])
+            choice.SetName(tr.t(label_key))
+            choice.SetSelection(amounts.index(current))
+            row.Add(label, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=8)
+            row.Add(choice, flag=wx.ALIGN_CENTER_VERTICAL)
+            seek_box.Add(row, flag=wx.LEFT | wx.RIGHT | wx.TOP, border=8)
+            self.seek_step_choices[kind] = (choice, amounts)
+        reset_seek_button = wx.Button(panel, label=tr.t("options_seek_steps_reset"))
+        reset_seek_button.Bind(wx.EVT_BUTTON, self._on_reset_seek_steps)
+        seek_box.Add(reset_seek_button, flag=wx.ALL, border=8)
 
         playback_nav_sizer.AddSpacer(15)
         playback_nav_panel.SetSizer(playback_nav_sizer)
@@ -574,6 +634,8 @@ class OptionsDialog(wx.Dialog):
         notebook.AddPage(accessibility_panel, tr.t("options_tab_accessibility"))
         notebook.AddPage(converter_panel, tr.t("options_tab_converter"))
         notebook.AddPage(recorder_panel, tr.t("options_tab_recorder"))
+        self._build_editor_tab(editor_panel)
+        notebook.AddPage(editor_panel, tr.t("options_tab_editor"))
 
         notebook.Bind(wx.EVT_NOTEBOOK_PAGE_CHANGED, self._on_tab_changed)
 
@@ -581,6 +643,8 @@ class OptionsDialog(wx.Dialog):
 
         button_sizer = wx.BoxSizer(wx.HORIZONTAL)
         save_button = wx.Button(outer_panel, wx.ID_OK, label=tr.t("options_save_button"))
+        # اختصاران بنفس المفاتيح لا يُحفظان: التحقق قبل إغلاق النافذة
+        save_button.Bind(wx.EVT_BUTTON, self._on_save_clicked)
         cancel_button = wx.Button(outer_panel, wx.ID_CANCEL, label=tr.t("options_cancel_button"))
         save_button.SetDefault()
         bind_space_like_enter(self)
@@ -680,20 +744,20 @@ class OptionsDialog(wx.Dialog):
         converter_box.Add(converter_row, flag=wx.LEFT | wx.RIGHT | wx.TOP, border=8)
 
         bitrate_row = wx.BoxSizer(wx.HORIZONTAL)
-        # «أعلى جودة متاحة» بدل رقم ثابت: الرقم الثابت كان بيتحوّل لأقرب
-        # قيمة في كل صيغة (شوف HIGHEST_AUDIO_BITRATE)
-        self.converter_highest_bitrate_check = wx.CheckBox(
-            panel, label=tr.t("audio_bitrate_highest_label")
-        )
+        # معدلات بت الصيغة المختارة نفسها، وأولها «أعلى جودة متاحة»، كما
+        # في نافذة المحوّل والمسجّل (gui/audio_bitrate_widget.py). كانت
+        # قائمة واحدة لكل الصيغ فيها أرقام لا تقبلها الصيغة
         converter_audio_bitrate_label = wx.StaticText(panel, label=tr.t("converter_custom_audio_bitrate_label"))
-        self.converter_audio_bitrate_spin = wx.SpinCtrl(panel, min=32, max=512, initial=192)
-        self.converter_audio_bitrate_spin.SetName(tr.t("converter_custom_audio_bitrate_label"))
+        self.converter_audio_bitrate_choice = wx.Choice(panel)
+        self.converter_audio_bitrate_choice.SetName(tr.t("converter_custom_audio_bitrate_label"))
+        self.converter_audio_bitrate_note = wx.StaticText(
+            panel, label=tr.t("converter_audio_bitrate_not_applicable"))
         converter_video_bitrate_label = wx.StaticText(panel, label=tr.t("converter_custom_video_bitrate_label"))
-        self.converter_video_bitrate_spin = wx.SpinCtrl(panel, min=200, max=20000, initial=4000)
+        self.converter_video_bitrate_spin = ValueChoice(panel, VIDEO_BITRATES_KBPS, initial=4000)
         self.converter_video_bitrate_spin.SetName(tr.t("converter_custom_video_bitrate_label"))
-        bitrate_row.Add(self.converter_highest_bitrate_check, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=16)
         bitrate_row.Add(converter_audio_bitrate_label, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=6)
-        bitrate_row.Add(self.converter_audio_bitrate_spin, flag=wx.RIGHT, border=16)
+        bitrate_row.Add(self.converter_audio_bitrate_choice, flag=wx.RIGHT, border=8)
+        bitrate_row.Add(self.converter_audio_bitrate_note, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=16)
         bitrate_row.Add(converter_video_bitrate_label, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=6)
         bitrate_row.Add(self.converter_video_bitrate_spin)
         converter_box.Add(bitrate_row, flag=wx.LEFT | wx.RIGHT | wx.TOP | wx.BOTTOM, border=8)
@@ -704,13 +768,9 @@ class OptionsDialog(wx.Dialog):
         if format_index != wx.NOT_FOUND:
             self.converter_format_choice.SetSelection(format_index)
         saved_audio_kbps = _safe_get_setting(settings, "converter_default_audio_bitrate", 0)
-        self.converter_highest_bitrate_check.SetValue(not saved_audio_kbps)
-        self.converter_audio_bitrate_spin.SetValue(saved_audio_kbps or 192)
-        self.converter_audio_bitrate_spin.Enable(bool(saved_audio_kbps))
-        self.converter_highest_bitrate_check.Bind(
-            wx.EVT_CHECKBOX,
-            lambda event: self.converter_audio_bitrate_spin.Enable(not event.IsChecked()),
-        )
+        self._refresh_converter_audio_bitrates(int(saved_audio_kbps or 0) * 1000)
+        self.Bind(wx.EVT_CHOICE, lambda event: self._refresh_converter_audio_bitrates(),
+                  self.converter_format_choice)
         self.converter_video_bitrate_spin.SetValue(_safe_get_setting(settings, "converter_default_video_bitrate", 4000))
 
         converter_sizer.AddSpacer(10)
@@ -784,14 +844,29 @@ class OptionsDialog(wx.Dialog):
         recorder_row1b = wx.BoxSizer(wx.HORIZONTAL)
         bit_depth_label = wx.StaticText(panel, label=tr.t("recorder_bit_depth_label"))
         self.recorder_bit_depth_choice = wx.Choice(
-            panel, choices=[tr.t("recorder_bit_depth_16"), tr.t("recorder_bit_depth_32")]
+            panel, choices=[tr.t(f"recorder_bit_depth_{depth}") for depth in SUPPORTED_BIT_DEPTHS]
         )
         self.recorder_bit_depth_choice.SetName(tr.t("recorder_bit_depth_label"))
         saved_bd = _safe_get_setting(settings, "recorder_default_bit_depth", 16)
-        self.recorder_bit_depth_choice.SetSelection(0 if saved_bd == 16 else 1)
+        self.recorder_bit_depth_choice.SetSelection(
+            SUPPORTED_BIT_DEPTHS.index(saved_bd) if saved_bd in SUPPORTED_BIT_DEPTHS else 0)
         recorder_row1b.Add(bit_depth_label, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=6)
         recorder_row1b.Add(self.recorder_bit_depth_choice)
         recorder_box.Add(recorder_row1b, flag=wx.LEFT | wx.RIGHT | wx.TOP, border=8)
+
+        enhance_row = wx.BoxSizer(wx.HORIZONTAL)
+        enhance_label = wx.StaticText(panel, label=tr.t("recorder_enhance_label"))
+        self.recorder_enhance_choice = wx.Choice(
+            panel, choices=[tr.t(f"recorder_enhance_{level}") for level in ENHANCE_LEVELS])
+        self.recorder_enhance_choice.SetName(tr.t("recorder_enhance_label"))
+        self.recorder_enhance_choice.SetSelection(ENHANCE_LEVELS.index(settings.get_recorder_enhance_level()))
+        enhance_row.Add(enhance_label, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=6)
+        enhance_row.Add(self.recorder_enhance_choice)
+        recorder_box.Add(enhance_row, flag=wx.LEFT | wx.RIGHT | wx.TOP, border=8)
+
+        self.recorder_exclusive_check = wx.CheckBox(panel, label=tr.t("recorder_exclusive_label"))
+        self.recorder_exclusive_check.SetValue(settings.get_recorder_exclusive())
+        recorder_box.Add(self.recorder_exclusive_check, flag=wx.LEFT | wx.RIGHT | wx.TOP, border=8)
 
         recorder_row2 = wx.BoxSizer(wx.HORIZONTAL)
         recorder_format_label = wx.StaticText(panel, label=tr.t("recorder_format_label"))
@@ -834,17 +909,137 @@ class OptionsDialog(wx.Dialog):
         recorder_sizer.AddSpacer(10)
         recorder_panel.SetSizer(recorder_sizer)
 
+    # ---------------- محرر الوسائط ----------------
+
+    def _build_editor_tab(self, panel):
+        tr, settings = self.tr, self.settings
+        sizer = wx.BoxSizer(wx.VERTICAL)
+
+        general_box = _add_group_box(panel, sizer, tr.t("options_editor_general_section"))
+        mode_row = wx.BoxSizer(wx.HORIZONTAL)
+        mode_label = wx.StaticText(panel, label=tr.t("editor_video_mode_label"))
+        self.editor_video_mode_choice = wx.Choice(
+            panel, choices=[tr.t("editor_video_mode_fast"), tr.t("editor_video_mode_precise")])
+        self.editor_video_mode_choice.SetName(tr.t("editor_video_mode_label"))
+        self.editor_video_mode_choice.SetSelection(1 if settings.get_editor_video_precise() else 0)
+        mode_row.Add(mode_label, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=8)
+        mode_row.Add(self.editor_video_mode_choice, flag=wx.ALIGN_CENTER_VERTICAL)
+        general_box.Add(mode_row, flag=wx.LEFT | wx.RIGHT | wx.TOP, border=8)
+
+        progress_row = wx.BoxSizer(wx.HORIZONTAL)
+        progress_label = wx.StaticText(panel, label=tr.t("options_editor_progress_label"))
+        self.editor_progress_choice = wx.Choice(panel, choices=[
+            tr.t("options_editor_progress_every", percent=step) if step else tr.t("options_editor_progress_off")
+            for step in _EDITOR_PROGRESS_STEPS])
+        self.editor_progress_choice.SetName(tr.t("options_editor_progress_label"))
+        current_step = settings.get_editor_progress_step()
+        self.editor_progress_choice.SetSelection(
+            _EDITOR_PROGRESS_STEPS.index(current_step) if current_step in _EDITOR_PROGRESS_STEPS else 1)
+        progress_row.Add(progress_label, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=8)
+        progress_row.Add(self.editor_progress_choice, flag=wx.ALIGN_CENTER_VERTICAL)
+        general_box.Add(progress_row, flag=wx.LEFT | wx.RIGHT | wx.TOP | wx.BOTTOM, border=8)
+
+        hotkeys_box = _add_group_box(panel, sizer, tr.t("options_editor_hotkeys_section"))
+        self.editor_hotkeys_checkbox = wx.CheckBox(panel, label=tr.t("options_editor_hotkeys_enable"))
+        self.editor_hotkeys_checkbox.SetValue(settings.get_enable_editor_hotkeys())
+        hotkeys_box.Add(self.editor_hotkeys_checkbox, flag=wx.LEFT | wx.RIGHT | wx.TOP, border=8)
+        _add_hint(panel, hotkeys_box, tr.t("options_editor_hotkeys_hint"))
+
+        # لكل اختصار: وصفه، ثم قائمة المفاتيح المساعدة، ثم قائمة المفتاح.
+        # قائمتان بدل «اضغط الاختصار»: قارئ الشاشة يعترض بعض الضغطات قبل
+        # أن تصل للنافذة، والقائمة تُقرأ وتُختار بالأسهم أو بالماوس
+        self._editor_modifier_names = [name for name, _code, _label in EDITOR_MODIFIER_CHOICES]
+        self._editor_key_names = [name for name, _code in EDITOR_KEY_CHOICES]
+        self.editor_hotkey_choices = {}
+        mapping = current_hotkeys(settings)
+        grid = wx.FlexGridSizer(cols=3, vgap=6, hgap=8)
+        for action in EDITOR_HOTKEY_ACTIONS:
+            action_text = tr.t(f"ghost_action_{action}")
+            label = wx.StaticText(panel, label=action_text)
+            modifiers_choice = wx.Choice(
+                panel, choices=[label_text for _n, _c, label_text in EDITOR_MODIFIER_CHOICES])
+            modifiers_choice.SetName(tr.t("options_editor_modifiers_name", action=action_text))
+            key_choice = wx.Choice(panel, choices=self._editor_key_names)
+            key_choice.SetName(tr.t("options_editor_key_name", action=action_text))
+            grid.Add(label, flag=wx.ALIGN_CENTER_VERTICAL)
+            grid.Add(modifiers_choice)
+            grid.Add(key_choice)
+            self.editor_hotkey_choices[action] = (modifiers_choice, key_choice)
+        self._set_editor_hotkey_choices(mapping)
+        hotkeys_box.Add(grid, flag=wx.ALL, border=8)
+
+        reset_button = wx.Button(panel, label=tr.t("options_editor_hotkeys_reset"))
+        reset_button.Bind(wx.EVT_BUTTON, self._on_reset_editor_hotkeys)
+        hotkeys_box.Add(reset_button, flag=wx.LEFT | wx.RIGHT | wx.BOTTOM, border=8)
+
+        sizer.AddSpacer(10)
+        panel.SetSizer(sizer)
+
+    def _set_editor_hotkey_choices(self, mapping):
+        for action, (modifiers_choice, key_choice) in self.editor_hotkey_choices.items():
+            modifiers, key = mapping[action]
+            modifiers_choice.SetSelection(self._editor_modifier_names.index(modifiers))
+            key_choice.SetSelection(self._editor_key_names.index(key))
+
+    def _editor_hotkey_mapping(self):
+        return {
+            action: (self._editor_modifier_names[m.GetSelection()], self._editor_key_names[k.GetSelection()])
+            for action, (m, k) in self.editor_hotkey_choices.items()
+        }
+
+    def _on_reset_editor_hotkeys(self, event):
+        self._set_editor_hotkey_choices(dict(EDITOR_DEFAULT_HOTKEYS))
+        wx.MessageBox(self.tr.t("options_editor_hotkeys_reset_done"), self.tr.t("options_dialog_title"),
+                      wx.ICON_INFORMATION, self)
+
+    def _on_reset_seek_steps(self, event):
+        for kind, (choice, amounts) in self.seek_step_choices.items():
+            choice.SetSelection(amounts.index(self.settings.SEEK_STEP_DEFAULTS[kind]))
+        wx.MessageBox(self.tr.t("options_seek_steps_reset_done"), self.tr.t("options_dialog_title"),
+                      wx.ICON_INFORMATION, self)
+
+    def select_tab(self, index):
+        self._ensure_tab_built(index)
+        self._go_to_tab(index)
+
+    def _on_save_clicked(self, event):
+        duplicates = find_duplicates(self._editor_hotkey_mapping())
+        if duplicates:
+            first, second = duplicates[0]
+            mapping = self._editor_hotkey_mapping()
+            wx.MessageBox(
+                self.tr.t("options_editor_hotkeys_duplicate",
+                          keys=combo_text(mapping[first]),
+                          first=self.tr.t(f"ghost_action_{first}"),
+                          second=self.tr.t(f"ghost_action_{second}")),
+                self.tr.t("title_error"), wx.ICON_ERROR, self)
+            self._go_to_tab(self.EDITOR_TAB)
+            self.editor_hotkey_choices[second][1].SetFocus()
+            return
+        event.Skip()
+
+    def _save_editor_tab(self):
+        _safe_set_setting(self.settings, "editor_video_precise",
+                          self.editor_video_mode_choice.GetSelection() == 1)
+        _safe_set_setting(self.settings, "editor_progress_step",
+                          _EDITOR_PROGRESS_STEPS[self.editor_progress_choice.GetSelection()])
+        _safe_set_setting(self.settings, "enable_editor_hotkeys", self.editor_hotkeys_checkbox.GetValue())
+        self.settings.set_editor_hotkeys(self._editor_hotkey_mapping())
+
+    def _save_seek_steps(self):
+        for kind, (choice, amounts) in self.seek_step_choices.items():
+            self.settings.set_seek_step(kind, amounts[choice.GetSelection()])
+
     def _save_converter_tab(self):
         """بتتنادى بس لو التبويب اتفتح واتبنى."""
         # تبويب ما اتفتحش: خياراته ما اتعدّلتش، فالمحفوظ يفضل زي ما هو
         _safe_set_setting(self.settings, "converter_default_is_video", self.converter_type_radio.GetSelection() == 1)
         _safe_set_setting(self.settings, "converter_default_format", self.converter_format_choice.GetStringSelection())
-        _safe_set_setting(
-            self.settings,
-            "converter_default_audio_bitrate",
-            0 if self.converter_highest_bitrate_check.GetValue()
-            else self.converter_audio_bitrate_spin.GetValue(),
-        )
+        # الصيغة بلا معدل بت (wav وflac): المحفوظ يبقى كما هو
+        if self.converter_audio_bitrate_choice.IsShown():
+            saved_kbps = _safe_get_setting(self.settings, "converter_default_audio_bitrate", 0)
+            bps = current_audio_bitrate_bps(self.converter_audio_bitrate_choice, int(saved_kbps or 0) * 1000)
+            _safe_set_setting(self.settings, "converter_default_audio_bitrate", int(bps or 0) // 1000)
         _safe_set_setting(self.settings, "converter_default_video_bitrate", self.converter_video_bitrate_spin.GetValue())
 
     def _save_recorder_tab(self):
@@ -867,7 +1062,7 @@ class OptionsDialog(wx.Dialog):
         _safe_set_setting(
             self.settings,
             "recorder_default_bit_depth",
-            16 if self.recorder_bit_depth_choice.GetSelection() == 0 else 32
+            SUPPORTED_BIT_DEPTHS[max(0, self.recorder_bit_depth_choice.GetSelection())]
         )
         _safe_set_setting(self.settings, "recorder_default_format", self.recorder_format_choice.GetStringSelection())
         if self.recorder_bitrate_choice.IsShown():
@@ -877,6 +1072,10 @@ class OptionsDialog(wx.Dialog):
                 "recorder_default_audio_bitrate",
                 current_audio_bitrate_bps(self.recorder_bitrate_choice, fallback_bitrate)
             )
+
+    def _save_recorder_quality(self):
+        self.settings.set_recorder_enhance_level(ENHANCE_LEVELS[self.recorder_enhance_choice.GetSelection()])
+        self.settings.set_recorder_exclusive(self.recorder_exclusive_check.GetValue())
 
     def _bind_tab_navigation(self, notebook):
         """Ctrl+Tab للتالي، Ctrl+Shift+Tab للسابق، و Ctrl+1..5 للقفز المباشر."""
@@ -943,6 +1142,19 @@ class OptionsDialog(wx.Dialog):
 
     def _on_converter_type_change(self, event):
         self._refresh_converter_format_choices()
+        self._refresh_converter_audio_bitrates()
+
+    def _refresh_converter_audio_bitrates(self, preferred_bps=None):
+        """قائمة معدلات البت لصيغة المحوّل الافتراضية المختارة الآن."""
+        if preferred_bps is None:
+            saved_kbps = _safe_get_setting(self.settings, "converter_default_audio_bitrate", 0)
+            preferred_bps = current_audio_bitrate_bps(self.converter_audio_bitrate_choice,
+                                                      int(saved_kbps or 0) * 1000)
+        refresh_audio_bitrate_choice(
+            self.converter_audio_bitrate_choice, self.converter_audio_bitrate_note, self.tr,
+            self.converter_format_choice.GetStringSelection(),
+            self.converter_type_radio.GetSelection() == 1, preferred_bps)
+        self._converter_panel.Layout()
 
     def _on_recorder_format_change(self, event):
         target_ext = self.recorder_format_choice.GetStringSelection() or ".wav"
@@ -1012,10 +1224,13 @@ class OptionsDialog(wx.Dialog):
                 # عناصرها مش موجودة أصلًا، وخياراتها ما اتعدّلتش.
                 # (شوف _ensure_tab_built)
                 # والحفظ وقتها كان هيكتب قيمًا افتراضية فوق المحفوظ.
+                self._save_seek_steps()
+                self._save_editor_tab()
                 if "converter" in self._built_tabs:
                     self._save_converter_tab()
                 if "recorder" in self._built_tabs:
                     self._save_recorder_tab()
+                    self._save_recorder_quality()
 
             if batch_ctx:
                 with batch_ctx:

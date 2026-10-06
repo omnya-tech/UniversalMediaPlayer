@@ -46,6 +46,8 @@ from core.formats import (
     is_lossless_audio_codec,
     pick_closest_audio_bitrate,
     resolve_audio_bitrate,
+    smart_audio_bitrate,
+    supported_sample_rate,
     target_supports_audio,
 )
 
@@ -319,6 +321,8 @@ def convert_file(
         if in_audio_stream is not None and target_supports_audio_track:
             audio_codec_name = preset["acodec"] if is_video else preset["codec"]
             effective_sample_rate = sample_rate or in_audio_stream.codec_context.sample_rate or 44100
+            # معدل لا يقبله المرمّز ينزل لأقرب معدل يقبله بدل فشل التحويل
+            effective_sample_rate = supported_sample_rate(audio_codec_name, effective_sample_rate)
             # خيارات المرمّز تُمرَّر عند الإنشاء: Vorbis يرفض العمل بلا
             # strict=-2، وضبطها بعد الفتح لا يصل إليه
             out_audio_stream = out_container.add_stream(
@@ -330,9 +334,13 @@ def convert_file(
             # فوق سقف المرمّز ينزل إليه بدل أن يفشل الترميز.
             # وبلا رقم أصلًا (صيغة بلا قائمة معدلات) يُؤخذ الافتراضي من
             # جدول الصيغة إن وُجد.
-            effective_bitrate = resolve_audio_bitrate(
+            # و«أعلى جودة» من أصل مضغوط بفقد لا تتجاوز ما يحفظ جودته
+            # (شوف smart_audio_bitrate)
+            effective_bitrate = smart_audio_bitrate(
                 audio_codec_name, audio_bitrate,
                 channels or in_audio_stream.codec_context.channels or 1,
+                source_codec=in_audio_stream.codec_context.name,
+                source_bitrate=in_audio_stream.codec_context.bit_rate or None,
             )
             if effective_bitrate:
                 out_audio_stream.bit_rate = effective_bitrate

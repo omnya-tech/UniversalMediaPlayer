@@ -14,16 +14,22 @@ import wave
 import numpy as np
 import sounddevice as sd
 
-from core.audio_devices import wasapi_shared_settings
+from core.audio_devices import looks_like_system_audio, wasapi_exclusive_settings, wasapi_shared_settings
 from core.level_balance import TrackBalancer
 from core.logging_setup import configure_logging
+from core.voice_enhance import DEFAULT_ENHANCE_LEVEL, VoiceEnhancer
 
 _logger = configure_logging()
 
+# 24 بت تُلتقط كـ int32 (أعلى 24 بتًا منها هي الصوت) وتُكتب في WAV بثلاثة
+# بايتات للعينة. هامشها أوسع من 16 بت بكثير: الصوت الهادئ لا يخسر تفاصيله،
+# وحجمها أقل من 32 بت بالربع.
 _BIT_DEPTH_CONFIG = {
     16: {"dtype": "int16", "sample_width": 2, "max_abs": 32768.0},
+    24: {"dtype": "int32", "sample_width": 3, "max_abs": 2147483648.0},
     32: {"dtype": "int32", "sample_width": 4, "max_abs": 2147483648.0},
 }
+SUPPORTED_BIT_DEPTHS = (16, 24, 32)
 _DEFAULT_BIT_DEPTH = 16
 
 SUPPORTED_SAMPLE_RATES = (44100, 48000, 96000)
@@ -165,8 +171,11 @@ class AudioRecorder:
         self._stream = None
         self._stream_sec = None
         self._wave_file = None
-        self._queue_pri = queue.Queue(maxsize=200)
-        self._queue_sec = queue.Queue(maxsize=200)
+        # بلا حد: الطابور المحدود كان يرمي كتل الصوت بصمت لو تأخر الكاتب
+        # (ترميز MP3 مباشر على جهاز بطيء مثلًا)، فتظهر قطوع في التسجيل.
+        # الكتل تتراكم في الذاكرة لحظات ثم يلحق بها الكاتب
+        self._queue_pri = queue.Queue()
+        self._queue_sec = queue.Queue()
         self._writer_thread = None
         self._stop_flag = threading.Event()
         self._first_block = threading.Event()
@@ -193,6 +202,7 @@ class AudioRecorder:
         self._balance_enabled = True
         self._balance_pri = TrackBalancer()
         self._balance_sec = TrackBalancer()
+        self._reset_secondary_buffer(1)
 
         # رصد التشبّع: عدد العيّنات المتشبّعة وعدد الأحداث، وموضع آخر
         # حدث وطول السلسلة الحالية عشان الحدث اللي بيمتد على أكتر من
@@ -203,6 +213,13 @@ class AudioRecorder:
         self._samples_seen = 0
         self._clip_last_sample = -10**9
         self._clip_run = 0
+        self._input_overflows = 0
+
+        # تحسين صوت المايكروفون (core/voice_enhance.py) والوضع الحصري
+        self._enhancer = None
+        self.enhance_level = "off"
+        self.exclusive_requested = False
+        self.used_exclusive = False
 
         self._direct_encode = False
         self._out_container = None
@@ -210,6 +227,12 @@ class AudioRecorder:
         self._resampler = None
         self._av_format = None
         self._av_layout = None
+
+    def _reset_secondary_buffer(self, channels=None):
+        channels = channels or self._channels or 1
+        self._sec_buffer = np.zeros((0, channels), dtype=self._dtype)
+        self._sec_underruns = 0
+        self._sec_overruns = 0
 
     @property
     def bit_depth(self) -> int:
@@ -295,6 +318,8 @@ class AudioRecorder:
         target_ext: str = ".wav",
         audio_bitrate: int = 0,
         secondary_device_index=None,
+        enhance_level: str = "off",
+        exclusive: bool = False,
     ):
         if self._is_recording:
             msg = self.tr.t("rec_err_already_recording") if self.tr else "يوجد تسجيل قائم بالفعل"
@@ -321,6 +346,7 @@ class AudioRecorder:
         self._dtype = bit_depth_config["dtype"]
         self._max_abs = bit_depth_config["max_abs"]
         self._frames_written = 0
+        self._input_overflows = 0
         self._clipped_samples = 0
         self._clip_events = 0
         self._samples_seen = 0
@@ -332,6 +358,12 @@ class AudioRecorder:
         # شوف TrackBalancer.
         self._balance_pri = TrackBalancer()
         self._balance_sec = TrackBalancer()
+        self._reset_secondary_buffer()
+
+        self.enhance_level = enhance_level
+        self.exclusive_requested = bool(exclusive)
+        self.used_exclusive = False
+        self._enhancer = None
 
         self._stop_flag.clear()
         self._first_block.clear()
@@ -372,8 +404,28 @@ class AudioRecorder:
             msg = self._describe_open_failure(last_error)
             raise RecorderError(msg) from last_error
 
-        self._sample_rate = self._stream.samplerate
+        self._sample_rate = int(self._stream.samplerate)
         self._channels = min(self._channels, self._stream.channels)
+        self._reset_secondary_buffer(self._channels)
+        if self._wave_file is not None:
+            # الجهاز قد يُفتح بمعدل أو قنوات غير المطلوبة (المحاولات
+            # المتدرجة)؛ ترويسة WAV تتبع ما فُتح فعلًا وإلا خرج الصوت
+            # أسرع أو أبطأ. لم يُكتب شيء بعد، فالتغيير مسموح
+            self._wave_file.setframerate(self._sample_rate)
+            self._wave_file.setnchannels(self._channels)
+
+        # التحسين للمايكروفون وحده: جهير صوت النظام حقيقي لا طنين
+        try:
+            device_name = sd.query_devices(device_index).get("name", "")
+        except Exception:
+            device_name = ""
+        if VoiceEnhancer.is_active(enhance_level) and not looks_like_system_audio(device_name):
+            try:
+                self._enhancer = VoiceEnhancer(self._sample_rate, self._channels, enhance_level)
+            except Exception:
+                # بلا تحسين أفضل من بلا تسجيل
+                _logger.exception("تعذّر تجهيز تحسين الصوت، التسجيل يكمّل بدونه")
+                self._enhancer = None
 
         # 2. فتح جهاز الإدخال الثانوي (الستيريو ميكس) إن تم اختياره
         self._has_dual_input = False
@@ -587,7 +639,7 @@ class AudioRecorder:
             msg = self.tr.t("rec_err_direct_encode", ext=target_ext, error=exc) if self.tr else f"تعذر تجهيز ترميز التسجيل المباشر ({target_ext}): {exc}"
             raise RecorderError(msg) from exc
 
-        self._av_format = "s16" if self._bit_depth == 16 else "s32"
+        self._av_format = "s16" if self._bit_depth == 16 else "s32"  # 24 بت داخل s32
         self._av_layout = "mono" if self._channels == 1 else "stereo"
 
     def _input_attempts(self, sample_rate, channels):
@@ -605,6 +657,17 @@ class AudioRecorder:
         """
         shared = wasapi_shared_settings()
         seen = set()
+        # الوضع الحصري أولًا لو طُلب: البرنامج يكلّم كرت الصوت مباشرة بلا
+        # محرك ويندوز في الوسط، فلا خلط ولا تحويل معدل ولا «تحسينات»
+        # النظام. بالمعدل والقنوات المطلوبة بالضبط فقط؛ وإلا فالمشترك
+        if self.exclusive_requested:
+            exclusive = wasapi_exclusive_settings()
+            if exclusive is not None:
+                for chans in (channels, 1):
+                    key = (sample_rate, chans, "exclusive")
+                    if key not in seen:
+                        seen.add(key)
+                        yield sample_rate, chans, exclusive
         for rate in (sample_rate, 48000, 44100, 16000):
             for chans in (channels, 1):
                 for extra in (None, shared):
@@ -614,12 +677,56 @@ class AudioRecorder:
                     seen.add(key)
                     yield rate, chans, extra
 
+    # مدة قياس الوضع الحصري وأقصى انحراف مقبول عن المعدل المعلن
+    _EXCLUSIVE_PROBE_SECONDS = 0.6
+    _EXCLUSIVE_RATE_TOLERANCE = 0.03
+
+    def _exclusive_rate_ok(self, device_index, rate, chans, extra):
+        """
+        يقيس ما يرسله الجهاز فعلًا في الوضع الحصري قبل التسجيل.
+
+        بعض التعريفات تقبل الحصري ثم ترسل بمعدل غير المعلن أو تكرر
+        الكتل: مايك Realtek على جهاز التطوير أعلن 48000 وأرسل نحو 85000
+        عينة في الثانية، فخرج التسجيل أطول من الحقيقة ومشوّهًا. الفحص نصف
+        ثانية، والانحراف فوق 3% يعني الرجوع للوضع المشترك.
+        """
+        frames = [0]
+        first = [None]
+
+        def count(indata, frame_count, time_info, status):
+            if first[0] is None:
+                first[0] = time.perf_counter()
+                return
+            frames[0] += frame_count
+
+        try:
+            with sd.InputStream(device=device_index, samplerate=rate, channels=chans,
+                                dtype=self._dtype, callback=count, extra_settings=extra):
+                deadline = time.perf_counter() + FIRST_BLOCK_TIMEOUT
+                while first[0] is None and time.perf_counter() < deadline:
+                    time.sleep(0.01)
+                if first[0] is None:
+                    return False
+                time.sleep(self._EXCLUSIVE_PROBE_SECONDS)
+                elapsed = time.perf_counter() - first[0]
+        except Exception:
+            return False
+        measured = frames[0] / elapsed if elapsed > 0 else 0
+        ok = abs(measured - rate) <= rate * self._EXCLUSIVE_RATE_TOLERANCE
+        if not ok:
+            _logger.warning("الوضع الحصري أرسل %d عينة/ث بدل %d، الرجوع للمشترك",
+                            int(measured), int(rate))
+        return ok
+
     def _open_input_with_fallbacks(self, device_index, sample_rate, channels):
         """بيرجّع (نجح؟، آخر خطأ)."""
         last_error = None
         wanted = (sample_rate, channels)
 
         for rate, chans, extra in self._input_attempts(sample_rate, channels):
+            if getattr(extra, "_exclusive", False) and not self._exclusive_rate_ok(
+                    device_index, rate, chans, extra):
+                continue
             try:
                 self._stream = sd.InputStream(
                     device=device_index,
@@ -630,11 +737,20 @@ class AudioRecorder:
                     extra_settings=extra,
                 )
                 self._stream.start()
-                self._wait_for_first_block()
+                if not self._wait_for_first_block() and getattr(extra, "_exclusive", False):
+                    # جهاز قبل الحصري ولم يرسل شيئًا: نجرّب المشترك
+                    raise RecorderError("exclusive stream sent no audio")
             except Exception as exc:
                 last_error = exc
+                if self._stream is not None:
+                    try:
+                        self._stream.close()
+                    except Exception:
+                        pass
                 self._stream = None
                 continue
+
+            self.used_exclusive = bool(getattr(extra, "_exclusive", False))
 
             if (rate, chans) != wanted:
                 _logger.warning(
@@ -727,12 +843,18 @@ class AudioRecorder:
 
     def _audio_callback_pri(self, indata, frames, time_info, status):
         self._first_block.set()
+        # كتلة ضاعت قبل أن نستلمها (البرنامج تأخر عن كرت الصوت): لا تُسمع
+        # إلا قطعًا قصيرًا، فتُعدّ ليظهر سببها في التقرير التشخيصي
+        if status.input_overflow:
+            self._input_overflows += 1
         if self._pause_flag.is_set(): return
         data = self._format_channels(indata.copy())
         try: self._queue_pri.put_nowait(data)
         except queue.Full: pass
 
     def _audio_callback_sec(self, indata, frames, time_info, status):
+        if status.input_overflow:
+            self._input_overflows += 1
         if self._pause_flag.is_set(): return
         data = self._format_channels(indata.copy())
         try: self._queue_sec.put_nowait(data)
@@ -744,12 +866,65 @@ class AudioRecorder:
         if data.shape[1] == 1 and self._channels == 2:
             data = np.repeat(data, 2, axis=1)
         elif data.shape[1] == 2 and self._channels == 1:
-            data = np.mean(data, axis=1, keepdims=True)
+            # المتوسط يخرج أعدادًا عشرية؛ الملف يُكتب بنوع العينة الأصلي
+            data = np.mean(data, axis=1, keepdims=True).astype(data.dtype)
         return data
 
     # بعد الموازنة كل مسار عند المستوى المستهدف، فالنص بيخلّي المجموع
     # تحت السقف
     _MIX_GAIN = 0.5
+
+    # أقصى انتظار لصوت الجهاز الثاني قبل الكتابة بدونه (بالثواني)، وأقصى
+    # ما يتراكم منه قبل أن يُقصّ الزائد: الجهازان بساعتين مختلفتين، فأحدهما
+    # يسبق الآخر ببطء
+    _SECONDARY_WAIT = 0.1
+    _SECONDARY_MAX_BACKLOG = 0.3
+    _SECONDARY_KEEP_BACKLOG = 0.1
+
+    def _take_secondary(self, count):
+        """
+        بالضبط count عينة من الجهاز الثاني، لتُدمج مع مثلها من الأول.
+
+        الجهازان يرسلان كتلًا بأحجام وإيقاعات مختلفة. الكود القديم كان
+        يدمج كتلة بكتلة: لو لم تكن كتلة الثاني جاهزة في اللحظة نفسها كُتب
+        الأول وحده بمستوى كامل، والمدموج يُكتب بنصف المستوى، فكان صوت
+        المايكروفون يرتفع وينخفض كل عشر مللي ثوانٍ تقريبًا. هذا ما وصفه
+        مستخدمون بانقطاعات قصيرة وتشويه. والكتل المختلفة الأطوال كانت
+        تُكمَّل بصمت في وسط التسجيل.
+
+        الآن عينات الثاني تتجمع في مخزن، ويؤخذ منه العدد المطلوب بالضبط.
+        لو نقص ينتظر قليلًا، ولو بقي ناقصًا (جهاز توقف) يكمّل بصمت ويُحسب
+        ذلك في السجل. ولو تراكم أكثر من اللازم (ساعة الثاني أسرع) يُقصّ
+        الزائد مرة واحدة بدل أن يتأخر صوته عن الأول باستمرار.
+        """
+        buffer = self._sec_buffer
+        deadline = time.monotonic() + self._SECONDARY_WAIT
+        while True:
+            parts = [buffer]
+            while True:
+                try:
+                    parts.append(self._queue_sec.get_nowait())
+                except queue.Empty:
+                    break
+            if len(parts) > 1:
+                buffer = np.concatenate(parts)
+            if len(buffer) >= count or time.monotonic() >= deadline or self._stop_flag.is_set():
+                break
+            time.sleep(0.005)
+
+        rate = self._sample_rate or 48000
+        if len(buffer) - count > rate * self._SECONDARY_MAX_BACKLOG:
+            excess = len(buffer) - count - int(rate * self._SECONDARY_KEEP_BACKLOG)
+            buffer = buffer[excess:]
+            self._sec_overruns += 1
+
+        taken = buffer[:count]
+        self._sec_buffer = buffer[count:]
+        if len(taken) < count:
+            self._sec_underruns += 1
+            padding = np.zeros((count - len(taken), buffer.shape[1]), dtype=buffer.dtype)
+            taken = np.concatenate([taken, padding])
+        return taken
 
     def _mix_audio_chunks(self, c1, c2):
         """
@@ -792,23 +967,25 @@ class AudioRecorder:
             except queue.Empty:
                 continue
 
+            # التشبّع يُرصد على ما خرج من كرت الصوت قبل أي معالجة: المحدد
+            # يمنع القص في الملف، لكن المايك المرتفع يستحق التنبيه
+            self._track_clipping(chunk_pri)
+            if self._enhancer is not None:
+                try:
+                    chunk_pri = self._enhancer.process(chunk_pri, self._max_abs)
+                except Exception:
+                    _logger.exception("تحسين الصوت فشل أثناء التسجيل، يُكمل بدونه")
+                    self._enhancer = None
+                if not len(chunk_pri):
+                    continue
+
             chunk = chunk_pri
 
             if self._has_dual_input:
-                try:
-                    chunk_sec = self._queue_sec.get_nowait()
-                    chunk = self._mix_audio_chunks(chunk_pri, chunk_sec)
-                except queue.Empty:
-                    pass
+                chunk = self._mix_audio_chunks(chunk_pri, self._take_secondary(len(chunk_pri)))
 
             try:
-                self._track_clipping(chunk)
-
-                if self._direct_encode:
-                    self._encode_chunk(chunk)
-                else:
-                    self._wave_file.writeframes(chunk.tobytes())
-                self._frames_written += len(chunk)
+                self._write_chunk(chunk)
 
                 if self.on_level:
                     normalized = chunk.astype(np.float32) / self._max_abs
@@ -825,6 +1002,26 @@ class AudioRecorder:
                     self.on_error(str(exc))
                 self._stop_flag.set()
                 return
+
+        # ما احتجزه تقليل الضوضاء في آخر التسجيل
+        if self._enhancer is not None:
+            try:
+                tail = self._enhancer.flush()
+                if tail is not None and len(tail):
+                    self._write_chunk(tail)
+            except Exception:
+                _logger.exception("تعذّر تفريغ تحسين الصوت في آخر التسجيل")
+
+    def _write_chunk(self, chunk):
+        if self._direct_encode:
+            self._encode_chunk(chunk)
+        elif self._bit_depth == 24:
+            # أعلى ثلاثة بايتات من كل عينة int32 (ترتيب little-endian)
+            raw = np.ascontiguousarray(chunk, dtype="<i4").view(np.uint8).reshape(-1, 4)[:, 1:]
+            self._wave_file.writeframes(raw.tobytes())
+        else:
+            self._wave_file.writeframes(chunk.tobytes())
+        self._frames_written += len(chunk)
 
     def pause(self):
         self._pause_flag.set()
@@ -864,12 +1061,16 @@ class AudioRecorder:
         # بلا أسماء ملفات ولا مسارات: السجل بيتبعت في التقرير التشخيصي.
         # (شوف core/diagnostics.py)
         _logger.info(
-            "REC_SUMMARY sr=%s ch=%s bits=%s fmt=%s dual=%s written=%.2fs wall=%.2fs "
-            "clipped_samples=%d clip_events=%d",
+            "REC_SUMMARY sr=%s ch=%s bits=%s fmt=%s dual=%s exclusive=%s enhance=%s "
+            "written=%.2fs wall=%.2fs clipped_samples=%d clip_events=%d "
+            "input_overflows=%d sec_underruns=%d sec_overruns=%d",
             self._sample_rate, self._channels, self._bit_depth,
             ".wav" if not self._direct_encode else "encoded",
-            self._has_dual_input, duration, wall_elapsed,
+            self._has_dual_input, self.used_exclusive,
+            self.enhance_level if self._enhancer is not None else "off",
+            duration, wall_elapsed,
             self._clipped_samples, self._clip_events,
+            self._input_overflows, self._sec_underruns, self._sec_overruns,
         )
 
         if self._wave_file is not None:

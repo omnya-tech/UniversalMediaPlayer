@@ -22,6 +22,7 @@ from core.media_editor import (
     EditJobRunner,
     extract_segments,
     get_duration,
+    has_video,
     merge_files,
     split_file,
 )
@@ -29,6 +30,7 @@ from core.formats import ConversionError
 from core.notification_sound import play_completion_chime, play_error_chime
 from core.time_input import TimeParseError, format_time_precise, parse_time
 from gui.dialog_helpers import bind_escape_closes
+from gui.editor_hotkeys import current_hotkeys, hotkeys_help_text
 from i18n.plural import count_phrase
 from accessibility.announcer import _resource_path
 
@@ -46,9 +48,15 @@ def unique_path(path):
     return f"{base} ({counter}){ext}"
 
 
-def split_output_paths(tr, path):
-    """مسارا جزأي التقسيم بجانب الأصل: «اسم - الجزء 1» و«اسم - الجزء 2»."""
+def split_output_paths(tr, path, folder=None):
+    """
+    مسارا جزأي التقسيم: «اسم - الجزء 1» و«اسم - الجزء 2».
+
+    في folder لو أُعطي (مجلد محرر الوسائط)، وإلا بجانب الأصل.
+    """
     base, ext = os.path.splitext(path)
+    if folder:
+        base = os.path.join(folder, os.path.basename(base))
     names = [f"{base} - {tr.t('editor_part_name', number=n)}" for n in (1, 2)]
     # رقم التمييز واحد للجزأين، فلا يصير «الجزء 1 (2)» مع «الجزء 2»
     counter = 1
@@ -243,10 +251,16 @@ class MediaEditorDialog(wx.Frame):
 
     position_provider: دالة ترجع (مسار الملف المفتوح، الموضع بالثواني) أو
     None، فيملأ زر «الموضع الحالي» الوقت من المشغّل وأنت تسمع.
+
+    hotkeys_enabled وon_hotkeys_toggled: حالة الاختصارات الشبحية ودالة
+    تغييرها في المشغّل (gui/editor_hotkeys.py). مع hide_on_close تُخفى
+    النافذة عند إغلاقها بدل أن تُهدم، فما حدده المستخدم بالاختصارات وهو
+    يسمع يبقى حتى يرجع إليه؛ والمشغّل يهدمها عند خروجه.
     """
 
     def __init__(self, tr, announcer=None, initial_path=None, position_provider=None,
-                 bookmarks_provider=None):
+                 bookmarks_provider=None, hotkeys_enabled=None, on_hotkeys_toggled=None,
+                 hide_on_close=False, settings=None, on_open_settings=None):
         super().__init__(None, title=tr.t("editor_title"), size=(640, 600),
                          style=wx.DEFAULT_FRAME_STYLE)
         self.tr = tr
@@ -257,6 +271,15 @@ class MediaEditorDialog(wx.Frame):
         self._segments = []
         self._runner = None
         self._last_pct = -1
+        self._hotkeys_enabled = hotkeys_enabled
+        self._on_hotkeys_toggled = on_hotkeys_toggled
+        self._hide_on_close = hide_on_close
+        # الإعدادات: طريقة قص الفيديو الافتراضية، وتواتر إعلان التقدم،
+        # ونصوص الاختصارات الحالية. بلاها تعمل النافذة بالقيم الافتراضية
+        self.settings = settings
+        self._on_open_settings = on_open_settings
+        # بداية مقطع حُددت بالاختصار ولم تُحدد نهايتها بعد
+        self._pending_start = None
 
         icon_path = _resource_path("resources", "omnya_icon.ico")
         if os.path.isfile(icon_path):
@@ -284,7 +307,10 @@ class MediaEditorDialog(wx.Frame):
         self.video_mode_choice = wx.Choice(panel, choices=[tr.t("editor_video_mode_fast"),
                                                            tr.t("editor_video_mode_precise")])
         self.video_mode_choice.SetName(tr.t("editor_video_mode_label"))
-        self.video_mode_choice.SetSelection(0)
+        precise = bool(self.settings and self.settings.get_editor_video_precise())
+        self.video_mode_choice.SetSelection(1 if precise else 0)
+        # آخر طريقة اختارها المستخدم هي ما تبدأ به النافذة في المرة التالية
+        self.video_mode_choice.Bind(wx.EVT_CHOICE, self._on_video_mode_changed)
         mode_row.Add(mode_caption, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=8)
         mode_row.Add(self.video_mode_choice, flag=wx.ALIGN_CENTER_VERTICAL)
         outer.Add(mode_row, flag=wx.LEFT | wx.RIGHT | wx.TOP, border=12)
@@ -314,6 +340,22 @@ class MediaEditorDialog(wx.Frame):
         for button in (self.start_button, self.cancel_button, close_button):
             buttons.Add(button, flag=wx.RIGHT, border=8)
         outer.Add(buttons, flag=wx.ALIGN_RIGHT | wx.ALL, border=12)
+
+        if self._hotkeys_enabled is not None:
+            hotkeys_row = wx.BoxSizer(wx.HORIZONTAL)
+            self.hotkeys_checkbox = wx.CheckBox(
+                panel, label=tr.t("editor_hotkeys_checkbox", keys=self.hotkey_text("toggle")))
+            self.hotkeys_checkbox.SetValue(bool(self._hotkeys_enabled))
+            self.hotkeys_checkbox.Bind(wx.EVT_CHECKBOX, self._on_hotkeys_checkbox)
+            help_button = wx.Button(panel, label=tr.t("editor_hotkeys_list_button"))
+            help_button.Bind(wx.EVT_BUTTON, self._on_hotkeys_help)
+            hotkeys_row.Add(self.hotkeys_checkbox, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=8)
+            hotkeys_row.Add(help_button, flag=wx.ALIGN_CENTER_VERTICAL)
+            if self._on_open_settings is not None:
+                settings_button = wx.Button(panel, label=tr.t("editor_settings_button"))
+                settings_button.Bind(wx.EVT_BUTTON, lambda e: self._on_open_settings())
+                hotkeys_row.Add(settings_button, flag=wx.ALIGN_CENTER_VERTICAL | wx.LEFT, border=8)
+            outer.Add(hotkeys_row, flag=wx.LEFT | wx.RIGHT | wx.BOTTOM, border=12)
 
         panel.SetSizer(outer)
         frame_sizer = wx.BoxSizer(wx.VERTICAL)
@@ -542,6 +584,28 @@ class MediaEditorDialog(wx.Frame):
 
     # ---- التنفيذ ----
 
+    def _output_folder(self, path):
+        """
+        مجلد محرر الوسائط: «صوت» أو «فيديو» حسب الملف.
+
+        كانت ملفات القص تُحفظ بجانب الأصل فتتناثر في مجلدات المستخدم.
+        بلا إعدادات (الاختبارات) تبقى بجانب الأصل.
+        """
+        if self.settings is None:
+            return None
+        try:
+            return self.settings.get_editor_output_folder(has_video(path))
+        except Exception:
+            return None
+
+    def _output_base(self, path):
+        """(المسار بلا امتداد في مجلد المحرر، الامتداد) لاسم مقترح."""
+        base, ext = os.path.splitext(path)
+        folder = self._output_folder(path)
+        if folder:
+            base = os.path.join(folder, os.path.basename(base))
+        return base, ext
+
     def _precise(self):
         return self.video_mode_choice.GetSelection() == 1
 
@@ -558,7 +622,7 @@ class MediaEditorDialog(wx.Frame):
             at = self.split_time.value()
             if at is None:
                 return None
-            first, second = split_output_paths(tr, path)
+            first, second = split_output_paths(tr, path, self._output_folder(path))
             precise = self._precise()
 
             def job(cancel, progress):
@@ -580,7 +644,7 @@ class MediaEditorDialog(wx.Frame):
             precise = self._precise()
             for path in paths:
                 def job(cancel, progress, path=path):
-                    first, second = split_output_paths(tr, path)
+                    first, second = split_output_paths(tr, path, self._output_folder(path))
                     split_file(path, at, first, second, cancel, progress, tr, precise)
                 jobs.append((os.path.basename(path), job))
             return jobs
@@ -593,7 +657,7 @@ class MediaEditorDialog(wx.Frame):
             if not self._segments:
                 self.show_error(tr.t("editor_err_no_segments"))
                 return None
-            base, ext = os.path.splitext(path)
+            base, ext = self._output_base(path)
             output = self._ask_save_path(unique_path(f"{base} - {tr.t('editor_segments_name')}{ext}"))
             if not output:
                 return None
@@ -607,7 +671,7 @@ class MediaEditorDialog(wx.Frame):
         if len(paths) < 2:
             self.show_error(tr.t("editor_err_merge_count"))
             return None
-        base, ext = os.path.splitext(paths[0])
+        base, ext = self._output_base(paths[0])
         output = self._ask_save_path(unique_path(f"{base} - {tr.t('editor_merged_name')}{ext}"))
         if not output:
             return None
@@ -652,8 +716,10 @@ class MediaEditorDialog(wx.Frame):
             return
         pct = int(((index - 1) + fraction) / total * 100)
         self.progress_gauge.SetValue(pct)
-        # إعلان كل 25% يكفي ليعرف المستخدم أن العمل يتقدم دون إزعاج
-        if pct // 25 > self._last_pct // 25 and 0 < pct < 100:
+        # إعلان كل خطوة (25% افتراضيًا) يكفي ليعرف المستخدم أن العمل يتقدم
+        # دون إزعاج؛ والصفر يعني لا إعلان حتى ينتهي
+        step = self.settings.get_editor_progress_step() if self.settings else 25
+        if step and pct // step > self._last_pct // step and 0 < pct < 100:
             self.announce(f"{pct}%")
         self._last_pct = max(self._last_pct, pct)
 
@@ -690,4 +756,155 @@ class MediaEditorDialog(wx.Frame):
                 event.Veto()
                 return
             self._runner.cancel()
+        if self._hide_on_close and event.CanVeto():
+            event.Veto()
+            self.Hide()
+            return
         self.Destroy()
+
+    # ---- الاختصارات الشبحية ----
+    # الدوال التالية يستدعيها المشغّل من gui/editor_hotkeys.py والنافذة قد
+    # تكون مخفية؛ كلها ترجع نصًّا يعلنه المشغّل بدل أن تعلن بنفسها.
+
+    def _on_hotkeys_checkbox(self, event):
+        if self._on_hotkeys_toggled:
+            self._on_hotkeys_toggled(self.hotkeys_checkbox.GetValue())
+
+    def hotkey_text(self, action):
+        """نص الاختصار الحالي لفعل، مثل Ctrl+Alt+Shift+G."""
+        from gui.editor_hotkeys import combo_text
+        return combo_text(current_hotkeys(self.settings)[action])
+
+    def set_hotkeys_checkbox(self, enabled):
+        if getattr(self, "hotkeys_checkbox", None):
+            self.hotkeys_checkbox.SetValue(bool(enabled))
+            # الاختصار نفسه قد يكون تغيّر من الخيارات
+            self.hotkeys_checkbox.SetLabel(
+                self.tr.t("editor_hotkeys_checkbox", keys=self.hotkey_text("toggle")))
+
+    def _on_video_mode_changed(self, event):
+        if self.settings:
+            self.settings.set_editor_video_precise(self._precise())
+
+    def apply_settings(self):
+        """بعد حفظ الخيارات: طريقة القص الافتراضية الجديدة تظهر فورًا."""
+        if self.settings:
+            self.video_mode_choice.SetSelection(1 if self.settings.get_editor_video_precise() else 0)
+
+    def _on_hotkeys_help(self, event):
+        wx.MessageBox(hotkeys_help_text(self.tr, current_hotkeys(self.settings)),
+                      self.tr.t("editor_hotkeys_list_button"), wx.ICON_INFORMATION, self)
+
+    def _same_file(self, a, b):
+        return bool(a) and bool(b) and os.path.normcase(a) == os.path.normcase(b)
+
+    def ghost_set_split(self, path, seconds):
+        if not self._same_file(self.split_file.path, path):
+            self.split_file.set_path(path)
+        value = format_time_precise(seconds)
+        self.split_time.text.SetValue(value)
+        self.notebook.SetSelection(PAGE_SPLIT)
+        return self.tr.t("ghost_split_set", time=value, name=os.path.basename(path),
+                         keys=self.hotkey_text("run"))
+
+    def _ghost_segments_file(self, path):
+        """يجعل ملف صفحة المقاطع ملف المشغّل؛ يرجع تنبيهًا لو تغيّر."""
+        self.notebook.SetSelection(PAGE_SEGMENTS)
+        if self._same_file(self.segments_file.path, path):
+            return ""
+        self.segments_file.set_path(path)
+        self._pending_start = None
+        return self.tr.t("ghost_new_file", name=os.path.basename(path)) + " "
+
+    def ghost_segment_start(self, path, seconds):
+        note = self._ghost_segments_file(path)
+        self._pending_start = seconds
+        value = format_time_precise(seconds)
+        self.segment_start.text.SetValue(value)
+        self.segment_end.clear()
+        return note + self.tr.t("ghost_start_set", time=value)
+
+    def ghost_segment_end(self, path, seconds):
+        note = self._ghost_segments_file(path)
+        if self._pending_start is None:
+            return note + self.tr.t("ghost_need_start", keys=self.hotkey_text("start"))
+        start = self._pending_start
+        if seconds <= start:
+            return self.tr.t("ghost_end_before_start", start=format_time_precise(start))
+        self._pending_start = None
+        self._segments.append((start, seconds))
+        self._refresh_segments(select=len(self._segments) - 1)
+        self.segment_start.clear()
+        self.segment_end.clear()
+        return note + self.tr.t("editor_segment_added", count=len(self._segments),
+                                start=format_time_precise(start), end=format_time_precise(seconds))
+
+    def ghost_undo_segment(self):
+        self.notebook.SetSelection(PAGE_SEGMENTS)
+        if self._pending_start is not None:
+            self._pending_start = None
+            self.segment_start.clear()
+            return self.tr.t("ghost_start_cleared")
+        if not self._segments:
+            return self.tr.t("ghost_no_segments")
+        self._segments.pop()
+        self._refresh_segments(select=len(self._segments) - 1)
+        if not self._segments:
+            return self.tr.t("ghost_segment_undone_last")
+        return self.tr.t("ghost_segment_undone",
+                         segments=count_phrase(self.tr, "count_segments", len(self._segments)))
+
+    def ghost_add_to_list(self, page, path):
+        target = self.merge_list if page == PAGE_MERGE else self.split_many_list
+        self.notebook.SetSelection(page)
+        name = os.path.basename(path)
+        if not target.add([path]):
+            return self.tr.t("ghost_already_in_list", name=name)
+        key = "ghost_added_to_merge" if page == PAGE_MERGE else "ghost_added_to_split_many"
+        count = len(target.paths)
+        return self.tr.t(key, name=name, count=count, files=count_phrase(self.tr, "count_files", count))
+
+    def ghost_status(self):
+        tr = self.tr
+        page = self.notebook.GetSelection()
+        no_file = tr.t("editor_no_file")
+
+        def time_part(field):
+            value = field.text.GetValue().strip()
+            return tr.t("ghost_time_set", time=value) if value else tr.t("ghost_time_unset")
+        if self._runner is not None and self._runner.is_running():
+            return tr.t("ghost_status_working", percent=max(self._last_pct, 0))
+        if page == PAGE_SPLIT:
+            return tr.t("ghost_status_split",
+                        name=os.path.basename(self.split_file.path or "") or no_file,
+                        time_part=time_part(self.split_time))
+        if page == PAGE_SPLIT_MANY:
+            return tr.t("ghost_status_split_many",
+                        count=len(self.split_many_list.paths),
+                        files=count_phrase(tr, "count_files", len(self.split_many_list.paths)),
+                        time_part=time_part(self.split_many_time))
+        if page == PAGE_SEGMENTS:
+            text = tr.t("ghost_status_segments",
+                        name=os.path.basename(self.segments_file.path or "") or no_file,
+                        segments=count_phrase(tr, "count_segments", len(self._segments)))
+            if self._pending_start is not None:
+                text += " " + tr.t("ghost_status_pending",
+                                   time=format_time_precise(self._pending_start))
+            return text
+        return tr.t("ghost_status_merge", count=len(self.merge_list.paths),
+                    files=count_phrase(tr, "count_files", len(self.merge_list.paths)))
+
+    def ghost_run(self):
+        """يبدأ عمل الصفحة الحالية؛ النافذة تظهر لأن الحفظ قد يسأل أين."""
+        if self._runner is not None and self._runner.is_running():
+            return self.tr.t("ghost_busy")
+        self.Show()
+        self.Raise()
+        self._on_start(None)
+        return ""
+
+    def ghost_cancel(self):
+        if self._runner is None or not self._runner.is_running():
+            return self.tr.t("ghost_nothing_running")
+        self._runner.cancel()
+        return self.tr.t("ghost_cancelling")

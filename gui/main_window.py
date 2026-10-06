@@ -2,7 +2,7 @@
 """
 النافذة الرئيسية لمشغل الوسائط (Universal Media Player)
 مستقرة، وتدعم أسلوب إعلان موضع التقديم والإرجاع المخصص بالثواني، الدقائق، مع النطق الإجباري لأرقام لوحة الأرقام Numpad،
-وإدارة موحدة للمشغل والمحول والمسجل (نسخة خالية من المحرر).
+وإدارة موحدة للمشغل والمحول والمسجل ومحرر الوسائط.
 """
 
 import logging
@@ -23,6 +23,7 @@ from i18n.strings import Translator
 from gui import player_icons
 from gui.format_utils import format_time
 from gui.bookmarks_mixin import BookmarksMixin
+from gui.editor_hotkeys import EditorHotkeysMixin
 from gui.equalizer_mixin import EqualizerMixin
 from gui.playlist_mixin import PlaylistMixin, open_media_wildcard
 from gui.sleep_timer_mixin import SleepTimerDialog, SleepTimerMixin
@@ -126,12 +127,14 @@ class _MediaDropTarget(wx.FileDropTarget):
 
 
 class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin,
-                 EqualizerMixin, PlaylistMixin, wx.Frame):
-    SEEK_NORMAL_SECONDS = 10
-    SEEK_CTRL_SECONDS = 60
-    SEEK_SHIFT_SECONDS = 5 * 60
-    SEEK_ALT_SECONDS = 10 * 60
-    SEEK_CTRL_SHIFT_SECONDS = 30 * 60
+                 EqualizerMixin, PlaylistMixin, EditorHotkeysMixin, wx.Frame):
+    # مقادير التقديم والإرجاع يضبطها المستخدم من الخيارات (تبويب التشغيل
+    # والتنقل)؛ خصائص بنفس أسماء الثوابت القديمة فتبقى كل الاستدعاءات كما هي
+    SEEK_NORMAL_SECONDS = property(lambda self: self.settings.get_seek_step("normal"))
+    SEEK_CTRL_SECONDS = property(lambda self: self.settings.get_seek_step("ctrl"))
+    SEEK_SHIFT_SECONDS = property(lambda self: self.settings.get_seek_step("shift"))
+    SEEK_ALT_SECONDS = property(lambda self: self.settings.get_seek_step("alt"))
+    SEEK_CTRL_SHIFT_SECONDS = property(lambda self: self.settings.get_seek_step("ctrl_shift"))
     MAX_VOLUME = 100
     _MEDIA_HOTKEY_PLAY_PAUSE = 0xB301
     _MEDIA_HOTKEY_STOP = 0xB302
@@ -230,6 +233,7 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin,
 
         self._registered_media_hotkey_ids = set()
         self._register_global_media_keys()
+        self._init_editor_hotkeys()
 
         self._ui_timer = wx.Timer(self)
         self.Bind(wx.EVT_TIMER, self._on_timer_tick, self._ui_timer)
@@ -687,6 +691,9 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin,
         converter_item = tools_menu.Append(wx.ID_ANY, self.tr.t("menu_converter"))
         recorder_item = tools_menu.Append(wx.ID_ANY, f"{self.tr.t('menu_recorder')}\tCtrl+Shift+R")
         media_editor_item = tools_menu.Append(wx.ID_ANY, f"{self.tr.t('menu_media_editor')}\tCtrl+Shift+X")
+        self._editor_hotkeys_menu_item = tools_menu.AppendCheckItem(
+            wx.ID_ANY, self.tr.t("menu_editor_hotkeys", keys=self.editor_hotkey_text("toggle")))
+        self._editor_hotkeys_menu_item.Check(self.settings.get_enable_editor_hotkeys())
 
         tools_menu.AppendSeparator()
         sleep_timer_item = tools_menu.Append(wx.ID_ANY, self.tr.t("menu_sleep_timer"))
@@ -730,6 +737,7 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin,
         self.Bind(wx.EVT_MENU, self._on_converter, converter_item)
         self.Bind(wx.EVT_MENU, self._on_recorder, recorder_item)
         self.Bind(wx.EVT_MENU, self._on_media_editor, media_editor_item)
+        self.Bind(wx.EVT_MENU, self._on_editor_hotkeys_menu, self._editor_hotkeys_menu_item)
         self.Bind(wx.EVT_MENU, lambda e: self._change_speed(0.25), speed_increase_item)
         self.Bind(wx.EVT_MENU, lambda e: self._change_speed(-0.25), speed_decrease_item)
         self.Bind(wx.EVT_MENU, lambda e: self._reset_speed(), speed_reset_item)
@@ -791,6 +799,8 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin,
             self._on_next(event)
         elif hotkey_id == self._MEDIA_HOTKEY_PREV:
             self._on_previous(event)
+        elif self.is_editor_hotkey(hotkey_id):
+            self._on_editor_hotkey(hotkey_id)
 
     def _on_toggle_accessibility_shortcut(self, event):
         current = True
@@ -1234,6 +1244,13 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin,
         self._is_closing = True
         self.engine.stop()
         self._unregister_global_media_keys()
+        self._unregister_editor_hotkeys()
+        # المحرر يُخفى عند إغلاقه ولا يُهدم (انظر gui/editor_hotkeys.py)
+        editor = getattr(self, "_media_editor_dialog", None)
+        if editor:
+            if editor._runner is not None:
+                editor._runner.cancel()
+            editor.Destroy()
 
         if hasattr(self, "ipc_cleanup_callback") and self.ipc_cleanup_callback:
             self.ipc_cleanup_callback()

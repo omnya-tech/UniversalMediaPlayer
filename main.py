@@ -273,6 +273,25 @@ def main():
 
     app = wx.App(False)
 
+    # المجلدات القديمة (أسماء تتبع اللغة) تُضم للمجلدات الثلاثة الثابتة،
+    # في خيط جانبي فلا يتأخر ظهور النافذة
+    # (شوف Settings.migrate_legacy_output_folders)
+    def _migrate_folders():
+        try:
+            moved = settings.migrate_legacy_output_folders()
+            if moved:
+                logger.info("نُقل %d عنصرًا من مجلدات الحفظ القديمة", moved)
+        except Exception:
+            logger.exception("تعذّر نقل مجلدات الحفظ القديمة")
+
+    # الأسماء تُحسم هنا في الخيط الرئيسي (أول مرة فقط، بلغة البرنامج)، فلا
+    # يكتب خيطان ملف الإعدادات معًا
+    try:
+        settings.resolve_output_folders()
+    except Exception:
+        logger.exception("تعذّر تحديد مجلدات الحفظ")
+    threading.Thread(target=_migrate_folders, daemon=True).start()
+
     window = MainWindow()
     window.ipc_cleanup_callback = release_ipc_and_mutex
     window.Show()

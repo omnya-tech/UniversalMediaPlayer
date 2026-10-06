@@ -5,7 +5,75 @@
 """
 
 
-def get_shortcuts_list(lang: str = "ar") -> list:
+# سطور التقديم بمفاتيحها في القائمة، ونوع كل منها في الإعدادات
+_SEEK_LINE_KEYS = {
+    "ar": (("normal", "السهم الأيمن / الأيسر"), ("ctrl", "Ctrl + السهم الأيمن / الأيسر"),
+           ("shift", "Shift + السهم الأيمن / الأيسر"), ("alt", "Alt + السهم الأيمن / الأيسر"),
+           ("ctrl_shift", "Ctrl + Shift + السهم الأيمن / الأيسر")),
+    "en": (("normal", "Right / Left Arrow"), ("ctrl", "Ctrl + Right / Left Arrow"),
+           ("shift", "Shift + Right / Left Arrow"), ("alt", "Alt + Right / Left Arrow"),
+           ("ctrl_shift", "Ctrl + Shift + Right / Left Arrow")),
+}
+
+
+def get_shortcuts_list(lang: str = "ar", seek_steps: dict = None, ghost_hotkeys: dict = None) -> list:
+    """
+    قائمة الاختصارات مصنفة، للعرض في الدليل وللتصدير النصي.
+
+    seek_steps ({النوع: ثوانٍ}) وghost_hotkeys ({الفعل: (المساعدة، المفتاح)})
+    يضعان ما ضبطه المستخدم في الخيارات مكان القيم الافتراضية.
+    """
+    lines = _default_shortcuts_list(lang)
+    if seek_steps:
+        lines = _apply_seek_steps(lines, lang, seek_steps)
+    if ghost_hotkeys:
+        lines = _apply_ghost_hotkeys(lines, ghost_hotkeys)
+    return lines
+
+
+def _amount_text(lang, seconds):
+    from i18n.plural import count_phrase
+    from i18n.strings import Translator
+
+    tr = Translator(lang)
+    if seconds >= 60 and seconds % 60 == 0:
+        return count_phrase(tr, "count_minutes", seconds // 60)
+    return count_phrase(tr, "count_seconds", seconds)
+
+
+def _apply_seek_steps(lines, lang, seek_steps):
+    keys = _SEEK_LINE_KEYS["ar" if lang == "ar" else "en"]
+    result = []
+    for line in lines:
+        for kind, key_text in keys:
+            if line.endswith(": " + key_text) and kind in seek_steps:
+                amount = _amount_text(lang, seek_steps[kind])
+                line = (f"تقديم / إرجاع بـ {amount}: {key_text}" if lang == "ar"
+                        else f"Seek {amount}: {key_text}")
+                break
+        result.append(line)
+    return result
+
+
+def _apply_ghost_hotkeys(lines, ghost_hotkeys):
+    from gui.editor_hotkeys import DEFAULT_HOTKEYS, combo_text
+
+    replacements = {}
+    for action, default in DEFAULT_HOTKEYS:
+        if action in ghost_hotkeys:
+            replacements[": " + combo_text(default).replace("+", " + ")] = \
+                ": " + combo_text(ghost_hotkeys[action]).replace("+", " + ")
+    result = []
+    for line in lines:
+        for old, new in replacements.items():
+            if line.endswith(old):
+                line = line[: -len(old)] + new
+                break
+        result.append(line)
+    return result
+
+
+def _default_shortcuts_list(lang: str) -> list:
     """
     إرجاع قائمة مرتبة ومصنفة بمهنية عالية باختصارات المشغل، 
     تُستخدم للعرض أو عند التوليد والتصدير النصي لضمان أعلى مستويات التنسيق والوضوح.
@@ -65,6 +133,20 @@ def get_shortcuts_list(lang: str = "ar") -> list:
             "=== الأدوات والنوافذ العامة ===",
             "فتح نافذة مسجل الصوت: Ctrl + Shift + R",
             "فتح نافذة محرر الوسائط: Ctrl + Shift + X",
+            "",
+            "=== الاختصارات الشبحية لمحرر الوسائط (تعمل من أي مكان) ===",
+            "تشغيل الاختصارات الشبحية وإيقافها: Ctrl + Alt + Shift + G",
+            "فتح محرر الوسائط: Ctrl + Alt + Shift + O",
+            "تحديد نقطة القص عند الموضع الحالي: Ctrl + Alt + Shift + S",
+            "تحديد بداية مقطع عند الموضع الحالي: Ctrl + Alt + Shift + B",
+            "تحديد نهاية المقطع وإضافته: Ctrl + Alt + Shift + E",
+            "التراجع عن آخر مقطع أو بداية: Ctrl + Alt + Shift + Z",
+            "إضافة الملف الحالي إلى قائمة «قص عدة ملفات»: Ctrl + Alt + Shift + L",
+            "إضافة الملف الحالي إلى قائمة الدمج: Ctrl + Alt + Shift + M",
+            "الإعلان عما حُدِّد في المحرر: Ctrl + Alt + Shift + I",
+            "بدء العمل: Ctrl + Alt + Shift + Enter",
+            "إلغاء العمل الجاري: Ctrl + Alt + Shift + C",
+            "",
             "بدء / إيقاف التسجيل الصوتي المباشر: Ctrl + R",
             "إعلان مستوى الصوت أثناء التسجيل (داخل نافذة المسجّل): Ctrl + L",
             "فتح نافذة محول الصيغ: من قائمة أدوات (Tools Menu)",
@@ -131,6 +213,20 @@ def get_shortcuts_list(lang: str = "ar") -> list:
             "=== Tools & Windows ===",
             "Open Audio Recorder Window: Ctrl + Shift + R",
             "Open Media Editor Window: Ctrl + Shift + X",
+            "",
+            "=== Media Editor Ghost Shortcuts (work from anywhere) ===",
+            "Turn ghost shortcuts on or off: Ctrl + Alt + Shift + G",
+            "Open the Media Editor: Ctrl + Alt + Shift + O",
+            "Set the split point at the current position: Ctrl + Alt + Shift + S",
+            "Set a part start at the current position: Ctrl + Alt + Shift + B",
+            "Set the part end and add the part: Ctrl + Alt + Shift + E",
+            "Undo the last part or start: Ctrl + Alt + Shift + Z",
+            "Add the current file to the “Split several files” list: Ctrl + Alt + Shift + L",
+            "Add the current file to the merge list: Ctrl + Alt + Shift + M",
+            "Announce what is set in the editor: Ctrl + Alt + Shift + I",
+            "Start the work: Ctrl + Alt + Shift + Enter",
+            "Cancel the running work: Ctrl + Alt + Shift + C",
+            "",
             "Start / Stop Quick Recording Immediately: Ctrl + R",
             "Open Format Converter Window: From Tools Menu",
             "Open Program Options: Ctrl + Shift + P",
@@ -144,7 +240,7 @@ def get_shortcuts_list(lang: str = "ar") -> list:
         ]
 
 
-def build_user_guide_html(tr, seek_kwargs: dict = None) -> str:
+def build_user_guide_html(tr, seek_kwargs: dict = None, shortcuts_kwargs: dict = None) -> str:
     """
     إنشاء مستند HTML توثيقي عصري وراقي لعرض دليل الاستخدام الشامل والمنظم داخل المتصفح.
     """
@@ -214,13 +310,13 @@ def build_user_guide_html(tr, seek_kwargs: dict = None) -> str:
             "• <b>محول الصيغ:</b> حوّل ملفات الصوت والفيديو من قائمة السياق (زر الفأرة الأيمن) أو من قائمة أدوات، مع دعم "
             "المجلدات الكاملة وتنظيم الملفات الناتجة تلقائيًا.\n"
             "• <b>مسجّل الصوت:</b> يسجّل من المايكروفون أو من صوت النظام، ويبدأ ويتوقف بـ <code>Ctrl+R</code>.\n"
-            "• <b>محرر الوسائط:</b> لقص ملفات الصوت والفيديو ودمجها، من قائمة أدوات أو بـ <code>Ctrl+Shift+X</code>. اقسم ملفًا لجزأين، أو اقسم عدة ملفات "
-            "عند نفس الوقت دفعة واحدة، أو خذ مقاطع متفرقة من ملف طويل وضمها في ملف واحد، أو ادمج ملفات بالترتيب الذي "
-            "تختاره. الناتج بنفس صيغة الأصل، وزر «الموضع الحالي» يأخذ الوقت من المشغّل وأنت تسمع فلا تحتاج لكتابته. "
+            "• <b>محرر الوسائط:</b> لقص ملفات الصوت والفيديو ودمجها، من قائمة أدوات أو بـ <code>Ctrl+Shift+X</code>. اقسم ملفًا إلى جزأين، أو اقسم عدة ملفات "
+            "عند الوقت نفسه دفعة واحدة، أو خذ مقاطع متفرقة من ملف طويل وضُمّها في ملف واحد، أو ادمج ملفات بالترتيب الذي "
+            "تختاره. يخرج الناتج بصيغة الأصل نفسها، وزر «الموضع الحالي» يأخذ الوقت من المشغّل وأنت تسمع، فلا تحتاج إلى كتابته. "
             "وللفيديو طريقتان: «سريع بنفس الجودة» يبدأ القص من أقرب إطار مفتاحي (صورة كاملة كل بضع ثوانٍ)، "
-            "و«دقيق بالثانية» يقص عند الوقت بالضبط لكنه أبطأ. والفيديوهات المدموجة يجب أن تكون بنفس الصيغة والمقاس. "
-            "وأسهل طريقة: ضع علامة بـ <code>Ctrl+B</code> عند كل موضع وأنت تسمع، ثم في المحرر اختر الوقت «من العلامات»، "
-            "أو اضغط «مقاطع من العلامات» فتصير كل علامتين بداية مقطع ونهايته.\n"
+            "و«دقيق بالثانية» يقص عند الوقت بالضبط لكنه أبطأ. ويجب أن تتطابق ملفات الفيديو المدموجة في الصيغة والمقاس. "
+            "وأسهل طريقة: ضع علامة بـ <code>Ctrl+B</code> عند كل موضع وأنت تسمع، ثم اختر الوقت في المحرر «من العلامات»، "
+            "أو اضغط «مقاطع من العلامات» فتصير كل علامتين متتاليتين بداية مقطع ونهايته.\n"
             "• <b>اختبار المايكروفون قبل التسجيل:</b> زر داخل نافذة المسجّل يسجّل عشر ثوانٍ ثم يخبرك <b>نصًّا مقروءًا "
             "لقارئ الشاشة</b> هل المستوى ممتاز أم مرتفع أم منخفض أم لا يصل صوت أصلًا، مع خطوات الإصلاح. هذا يغنيك عن مؤشّر "
             "المستوى المرئي الذي لا يفيد من لا يرى.\n"
@@ -322,13 +418,13 @@ def build_user_guide_html(tr, seek_kwargs: dict = None) -> str:
             "• <b>Audio Recorder:</b> Built-in tool for high-quality audio recording, started and stopped with "
             "<code>Ctrl+R</code>.\n"
             "• <b>Media Editor:</b> cuts and merges audio and video files, from the Tools menu or <code>Ctrl+Shift+X</code>. Split a file in two, split "
-            "several files at the same time in one go, take scattered parts of a long file into one file, or merge files "
-            "in the order you choose. The result keeps the original format, and the «Current Position» "
-            "button takes the time from the player while you listen. Video has two modes: «Fast, same quality» "
-            "starts the cut at the nearest keyframe (a full picture every few seconds), and «Exact to the second» "
-            "cuts at the exact time but is slower. Merged videos must share the same format and size. "
-            "Easiest way: press <code>Ctrl+B</code> at each spot while listening, then in the editor pick a time "
-            "«From Bookmarks», or press «Parts from Bookmarks» so every two bookmarks become a part's start and end.\n"
+            "several files at the same time in one go, join scattered parts of a long file into one file, or merge files "
+            "in the order you choose. The result keeps the original format, and the “Current Position” "
+            "button takes the time from the player while you listen. Video has two modes: “Fast, same quality” "
+            "starts the cut at the nearest keyframe (a full picture every few seconds), and “Exact to the second” "
+            "cuts at the exact time but is slower. Merged video files must share the same format and size. "
+            "The easiest way: press <code>Ctrl+B</code> at each spot while listening, then pick a time in the editor "
+            "with “From Bookmarks”, or press “Parts from Bookmarks” so every two bookmarks in a row become a part's start and end.\n"
             "• <b>Microphone test:</b> records ten seconds and tells you <b>in text your screen reader can read</b> "
             "whether the level is good, too high, too low, or silent — along with how to fix it.\n"
             "• <b>Hear your level while recording:</b> press <code>Ctrl+L</code> at any time during a recording.\n"
@@ -380,7 +476,7 @@ def build_user_guide_html(tr, seek_kwargs: dict = None) -> str:
 
         sec7_title = "8. Complete Keyboard Shortcuts Map"
 
-    raw_shortcuts = get_shortcuts_list(lang)
+    raw_shortcuts = get_shortcuts_list(lang, **(shortcuts_kwargs or {}))
     formatted_shortcuts_html = []
     
     for line in raw_shortcuts:

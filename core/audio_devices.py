@@ -234,6 +234,27 @@ def wasapi_shared_settings():
         return None
 
 
+def wasapi_exclusive_settings():
+    """
+    إعدادات الوضع الحصري في WASAPI: البرنامج يمسك كرت الصوت وحده.
+
+    الصوت يمر من الكرت للبرنامج مباشرة بلا محرك ويندوز: لا خلط مع
+    البرامج الأخرى، ولا تحويل معدل، ولا «تحسينات» النظام التي قد تضغط
+    الصوت أو تقصه. الثمن أن برنامجًا آخر لا يستعمل المايكروفون نفسه أثناء
+    التسجيل، والمسجّل يرجع للوضع المشترك وحده لو رفض الكرت.
+
+    الكائن يحمل علامة _exclusive ليعرف المسجّل أي وضع فُتح فعلًا.
+    """
+    if sd is None:
+        return None
+    try:
+        settings = sd.WasapiSettings(exclusive=True)
+        settings._exclusive = True
+        return settings
+    except Exception:
+        return None
+
+
 def supported_rates(device_index, channels=1, native_rate=None):
     """
     المعدلات اللي الجهاز بيقبلها فعلًا.

@@ -18,6 +18,15 @@ from core.converter import (
 from gui.audio_bitrate_widget import current_audio_bitrate_bps, refresh_audio_bitrate_choice
 from gui.dialog_helpers import bind_escape_closes, bind_space_like_enter
 from gui.format_utils import format_time
+from gui.value_choice import (
+    CRF_VALUES,
+    FRAME_RATES,
+    VIDEO_BITRATES_KBPS,
+    VIDEO_HEIGHTS,
+    VIDEO_WIDTHS,
+    ValueChoice,
+    format_number,
+)
 from core.notification_sound import play_completion_chime, play_error_chime
 from i18n.plural import count_phrase
 from accessibility.announcer import _resource_path
@@ -26,18 +35,18 @@ _SAMPLE_RATES = [8000, 11025, 16000, 22050, 32000, 44100, 48000, 96000]
 
 
 def get_default_converter_dir(tr) -> str:
-    """استخراج أسماء المجلدات الافتراضية من ملف الترجمة"""
-    docs_dir = os.path.join(os.path.expanduser("~"), "Documents")
-    if not os.path.exists(docs_dir):
-        docs_dir = os.path.expanduser("~")
+    """
+    مجلد الملفات المحولة من إعدادات المستخدم (Settings.resolve_output_folders).
 
-    main_folder = tr.t("app_folder_name")
-    sub_folder = tr.t("folder_name_converted_files")
-    target_folder = os.path.join(docs_dir, main_folder, sub_folder)
+    كان يُبنى من نصوص الواجهة («مشغل الوسائط الشامل» بلا «- Omnya»)، فيصنع
+    مجلدًا رئيسيًا ثانيًا بجانب مجلد البرنامج، وبالإنجليزية ثالثًا.
+    """
+    from core.settings import default_output_folder
 
+    target_folder = default_output_folder("converted")
     try:
         os.makedirs(target_folder, exist_ok=True)
-    except Exception:
+    except OSError:
         pass
     return target_folder
 
@@ -131,14 +140,8 @@ class ConverterDialog(wx.Frame):
         self._explicit_subfolder = subfolder_name
         self._subfolder_name = subfolder_name
         
-        # التحديد الذكي للمجلد الفرعي في البداية
-        if not self._explicit_subfolder:
-            if len(self._input_paths) > 1:
-                first_dir = os.path.dirname(self._input_paths[0])
-                if first_dir:
-                    self._subfolder_name = os.path.basename(os.path.normpath(first_dir))
-            else:
-                self._subfolder_name = None
+        # لا مجلد فرعي لكل دفعة: كان يُصنع مجلد باسم مجلد المصدر مع كل
+        # تحويل لعدة ملفات، فازدحم مجلد الملفات المحولة بمجلدات مكررة
 
         self._converter = None
         self._is_converting = False
@@ -156,14 +159,6 @@ class ConverterDialog(wx.Frame):
             pass
 
     def _update_subfolder_and_label(self):
-        # تحديث ذكي لمسار الإخراج بناءً على عدد الملفات الحالية
-        if not self._explicit_subfolder:
-            if len(self._input_paths) > 1:
-                first_dir = os.path.dirname(self._input_paths[0])
-                if first_dir:
-                    self._subfolder_name = os.path.basename(os.path.normpath(first_dir))
-            else:
-                self._subfolder_name = None
 
         if hasattr(self, 'output_folder_label') and self.output_folder_label:
             display_folder = (
@@ -320,7 +315,7 @@ class ConverterDialog(wx.Frame):
 
         self.video_bitrate_row = wx.BoxSizer(wx.HORIZONTAL)
         video_bitrate_label = wx.StaticText(panel, label=tr.t("converter_custom_video_bitrate_label"))
-        self.video_bitrate_spin = wx.SpinCtrl(panel, min=200, max=20000, initial=4000)
+        self.video_bitrate_spin = ValueChoice(panel, VIDEO_BITRATES_KBPS, initial=4000)
         self.video_bitrate_spin.SetName(tr.t("converter_custom_video_bitrate_label"))
         self.video_bitrate_row.Add(video_bitrate_label, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=8)
         self.video_bitrate_row.Add(self.video_bitrate_spin, flag=wx.ALIGN_CENTER_VERTICAL)
@@ -328,7 +323,7 @@ class ConverterDialog(wx.Frame):
 
         self.crf_row = wx.BoxSizer(wx.HORIZONTAL)
         crf_label = wx.StaticText(panel, label=tr.t("converter_crf_label"))
-        self.crf_spin = wx.SpinCtrl(panel, min=0, max=51, initial=23)
+        self.crf_spin = ValueChoice(panel, CRF_VALUES, initial=23)
         self.crf_spin.SetName(tr.t("converter_crf_label"))
         self.crf_row.Add(crf_label, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=8)
         self.crf_row.Add(self.crf_spin, flag=wx.ALIGN_CENTER_VERTICAL)
@@ -349,10 +344,10 @@ class ConverterDialog(wx.Frame):
 
         self.resolution_custom_row = wx.BoxSizer(wx.HORIZONTAL)
         width_label = wx.StaticText(panel, label=tr.t("converter_width_label"))
-        self.width_spin = wx.SpinCtrl(panel, min=16, max=7680, initial=1280)
+        self.width_spin = ValueChoice(panel, VIDEO_WIDTHS, initial=1280)
         self.width_spin.SetName(tr.t("converter_width_label"))
         height_label = wx.StaticText(panel, label=tr.t("converter_height_label"))
-        self.height_spin = wx.SpinCtrl(panel, min=16, max=4320, initial=720)
+        self.height_spin = ValueChoice(panel, VIDEO_HEIGHTS, initial=720)
         self.height_spin.SetName(tr.t("converter_height_label"))
         self.resolution_custom_row.Add(width_label, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=8)
         self.resolution_custom_row.Add(self.width_spin, flag=wx.RIGHT, border=16)
@@ -375,8 +370,7 @@ class ConverterDialog(wx.Frame):
 
         self.frame_rate_custom_row = wx.BoxSizer(wx.HORIZONTAL)
         frame_rate_value_label = wx.StaticText(panel, label=tr.t("converter_frame_rate_value_label"))
-        self.frame_rate_spin = wx.SpinCtrlDouble(panel, min=1.0, max=240.0, initial=30.0, inc=0.001)
-        self.frame_rate_spin.SetDigits(3)
+        self.frame_rate_spin = ValueChoice(panel, FRAME_RATES, initial=30, formatter=format_number)
         self.frame_rate_spin.SetName(tr.t("converter_frame_rate_value_label"))
         self.frame_rate_custom_row.Add(frame_rate_value_label, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=8)
         self.frame_rate_custom_row.Add(self.frame_rate_spin, flag=wx.ALIGN_CENTER_VERTICAL)

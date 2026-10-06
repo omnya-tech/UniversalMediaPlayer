@@ -263,3 +263,44 @@ class ConversionCancelled(Exception):
 def get_supported_target_extensions(is_video: bool = False):
     return sorted(VIDEO_FORMATS.keys()) if is_video else sorted(AUDIO_FORMATS.keys())
 
+
+# مفكّكات الصيغ المضغوطة بفقد: ملف منها جودته محدودة بمعدل بته الأصلي
+_LOSSY_DECODERS = {
+    "mp3", "mp3float", "mp2", "mp2float", "aac", "aac_fixed", "vorbis", "libvorbis",
+    "opus", "libopus", "wmav1", "wmav2", "ac3", "eac3", "amrnb", "amr_nb", "real_144",
+    "cook", "atrac3", "dts", "dca",
+}
+
+
+def smart_audio_bitrate(codec_name, stored_bitrate, channels=1,
+                        source_codec=None, source_bitrate=None):
+    """
+    معدل الترميز مع «أعلى جودة» ذكية.
+
+    الرقم الذي اختاره المستخدم يُحترم كما هو (resolve_audio_bitrate). أما
+    «أعلى جودة» من أصل مضغوط بفقد فتقف عند أقرب معدل يحفظ جودة الأصل:
+    MP3 بـ128 كيلوبت محوَّل إلى MP3 بـ320 يكبر حجمه مرتين ونصفًا والصوت
+    هو هو، لأن ما ضاع في الضغط الأول لا يرجع. الأصل بلا فقد (WAV وFLAC)
+    يأخذ الأعلى فعلًا.
+    """
+    resolved = resolve_audio_bitrate(codec_name, stored_bitrate, channels)
+    if stored_bitrate or not resolved or not source_bitrate:
+        return resolved
+    if (source_codec or "") not in _LOSSY_DECODERS:
+        return resolved
+    options = get_audio_bitrate_options(codec_name) or ()
+    enough = [value for value in options if value >= source_bitrate]
+    return min(resolved, enough[0]) if enough else resolved
+
+
+def supported_sample_rate(codec_name, wanted_rate):
+    """
+    أقرب معدل عينة يقبله المرمّز، بلا رفع فوق المطلوب ما أمكن.
+
+    ملف 96 كيلوهرتز إلى MP3 كان يفشل التحويل كله (MP3 سقفه 48 كيلوهرتز).
+    """
+    options = AUDIO_SAMPLE_RATE_OPTIONS.get(codec_name)
+    if not options or not wanted_rate or wanted_rate in options:
+        return wanted_rate
+    lower = [rate for rate in options if rate <= wanted_rate]
+    return max(lower) if lower else min(options)

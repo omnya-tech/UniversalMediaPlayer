@@ -14,6 +14,7 @@ import numpy as np
 import wx
 
 from core.audio_recorder import (
+    SUPPORTED_BIT_DEPTHS,
     SUPPORTED_SAMPLE_RATES,
     AudioRecorder,
     RecorderError,
@@ -23,6 +24,7 @@ from core.audio_recorder import (
 )
 from core.audio_devices import group_devices, recommended_profile, supported_rates, looks_like_system_audio
 from core.formats import AUDIO_FORMATS
+from core.voice_enhance import DEFAULT_ENHANCE_LEVEL, ENHANCE_LEVELS
 from core.logging_setup import configure_logging
 from core.version import APP_VERSION
 from accessibility.announcer import _resource_path
@@ -250,11 +252,11 @@ class AudioRecorderDialog(wx.Frame):
         quality_row = wx.BoxSizer(wx.HORIZONTAL)
         bit_depth_label = wx.StaticText(panel, label=tr.t("recorder_bit_depth_label"))
         self.bit_depth_choice = wx.Choice(
-            panel, choices=[tr.t("recorder_bit_depth_16"), tr.t("recorder_bit_depth_32")]
+            panel, choices=[tr.t(f"recorder_bit_depth_{depth}") for depth in SUPPORTED_BIT_DEPTHS]
         )
         self.bit_depth_choice.SetName(tr.t("recorder_bit_depth_label"))
         default_bit_depth = self.settings.get_recorder_default_bit_depth() if self.settings is not None else 16
-        self.bit_depth_choice.SetSelection(0 if default_bit_depth == 16 else 1)
+        self._select_bit_depth(default_bit_depth)
 
         # أي تغيير في إعدادات الجهاز بيتحفظ له وحده
         # (شوف _remember_device_profile)
@@ -279,6 +281,25 @@ class AudioRecorderDialog(wx.Frame):
         quality_row.Add(target_label, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=6)
         quality_row.Add(self.format_choice, proportion=1)
         settings_sizer.Add(quality_row, flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, border=6)
+
+        # تحسين صوت المايكروفون والوضع الحصري (core/voice_enhance.py و
+        # wasapi_exclusive_settings). يُحفظ الاختيار فورًا للمرة القادمة
+        enhance_row = wx.BoxSizer(wx.HORIZONTAL)
+        enhance_label = wx.StaticText(panel, label=tr.t("recorder_enhance_label"))
+        self.enhance_choice = wx.Choice(
+            panel, choices=[tr.t(f"recorder_enhance_{level}") for level in ENHANCE_LEVELS])
+        self.enhance_choice.SetName(tr.t("recorder_enhance_label"))
+        level = self.settings.get_recorder_enhance_level() if self.settings is not None else DEFAULT_ENHANCE_LEVEL
+        self.enhance_choice.SetSelection(ENHANCE_LEVELS.index(level))
+        self.Bind(wx.EVT_CHOICE, self._on_enhance_change, self.enhance_choice)
+        enhance_row.Add(enhance_label, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=6)
+        enhance_row.Add(self.enhance_choice, proportion=1)
+        settings_sizer.Add(enhance_row, flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, border=6)
+
+        self.exclusive_check = wx.CheckBox(panel, label=tr.t("recorder_exclusive_label"))
+        self.exclusive_check.SetValue(self.settings.get_recorder_exclusive() if self.settings is not None else True)
+        self.exclusive_check.Bind(wx.EVT_CHECKBOX, self._on_exclusive_change)
+        settings_sizer.Add(self.exclusive_check, flag=wx.LEFT | wx.RIGHT | wx.BOTTOM, border=6)
 
         # معدل البت
         bitrate_row = wx.BoxSizer(wx.HORIZONTAL)
@@ -530,8 +551,7 @@ class AudioRecorderDialog(wx.Frame):
         # (والتغيير اليدوي بعد كده بيتحفظ للجهاز)
         # شوف _remember_device_profile.
         if hasattr(self, "bit_depth_choice"):
-            wanted_depth = int(profile.get("bit_depth", 16))
-            self.bit_depth_choice.SetSelection(0 if wanted_depth == 16 else 1)
+            self._select_bit_depth(int(profile.get("bit_depth", 16)))
 
         self._update_rate_headroom_note(working_rates)
         self._announce_device_profile(device, working_rates)
@@ -602,8 +622,28 @@ class AudioRecorderDialog(wx.Frame):
         self.settings.set_device_profile(device.name, {
             "sample_rate": rate,
             "channels": 1 if self.channels_choice.GetSelection() == 0 else 2,
-            "bit_depth": 16 if self.bit_depth_choice.GetSelection() == 0 else 32,
+            "bit_depth": self._selected_bit_depth(),
         })
+
+    def _select_bit_depth(self, depth):
+        self.bit_depth_choice.SetSelection(
+            SUPPORTED_BIT_DEPTHS.index(depth) if depth in SUPPORTED_BIT_DEPTHS else 0)
+
+    def _selected_bit_depth(self):
+        index = self.bit_depth_choice.GetSelection()
+        return SUPPORTED_BIT_DEPTHS[index] if index != wx.NOT_FOUND else 16
+
+    def _selected_enhance_level(self):
+        index = self.enhance_choice.GetSelection()
+        return ENHANCE_LEVELS[index] if index != wx.NOT_FOUND else DEFAULT_ENHANCE_LEVEL
+
+    def _on_enhance_change(self, event):
+        if self.settings is not None:
+            self.settings.set_recorder_enhance_level(self._selected_enhance_level())
+
+    def _on_exclusive_change(self, event):
+        if self.settings is not None:
+            self.settings.set_recorder_exclusive(self.exclusive_check.GetValue())
 
     def _on_format_change(self, event):
         target_ext = self.format_choice.GetStringSelection() or ".wav"
@@ -651,7 +691,7 @@ class AudioRecorderDialog(wx.Frame):
         except (ValueError, IndexError):
             self._mic_check_rate = SUPPORTED_SAMPLE_RATES[0]
         self._mic_check_channels = 1 if self.channels_choice.GetSelection() == 0 else 2
-        self._mic_check_depth = 32 if self.bit_depth_choice.GetSelection() == 1 else 16
+        self._mic_check_depth = self._selected_bit_depth()
 
         # WAV دايمًا: التحليل بيقرا العيّنات الخام من الملف
         try:
@@ -701,8 +741,16 @@ class AudioRecorderDialog(wx.Frame):
         except Exception:
             _logger.exception("تعذّرت قراءة ملف اختبار المايكروفون")
             return None
-        dtype = np.int16 if self._mic_check_depth == 16 else np.int32
-        return np.frombuffer(raw, dtype=dtype)
+        if self._mic_check_depth == 16:
+            return np.frombuffer(raw, dtype=np.int16)
+        if self._mic_check_depth == 24:
+            # ثلاثة بايتات للعينة: تُوسَّع إلى int32 بوضعها في أعلى البايتات،
+            # فتبقى على مقياس 32 بت نفسه (max_abs تحت)
+            triples = np.frombuffer(raw, dtype=np.uint8).reshape(-1, 3)
+            widened = np.zeros((len(triples), 4), dtype=np.uint8)
+            widened[:, 1:] = triples
+            return widened.view("<i4").reshape(-1)
+        return np.frombuffer(raw, dtype=np.int32)
 
     def _show_mic_check_result(self):
         from core.mic_check import analyse, technical_line, verdict_message
@@ -834,7 +882,7 @@ class AudioRecorderDialog(wx.Frame):
             sample_rate = SUPPORTED_SAMPLE_RATES[0]
 
         channels = 1 if self.channels_choice.GetSelection() == 0 else 2
-        bit_depth = 32 if self.bit_depth_choice.GetSelection() == 1 else 16
+        bit_depth = self._selected_bit_depth()
         target_ext = self.format_choice.GetStringSelection() or ".wav"
 
         final_dir = os.path.dirname(self._output_path) or "."
@@ -862,6 +910,8 @@ class AudioRecorderDialog(wx.Frame):
                 target_ext=target_ext,
                 audio_bitrate=self._get_audio_bitrate(),
                 secondary_device_index=sec_idx,
+                enhance_level=self._selected_enhance_level(),
+                exclusive=self.exclusive_check.GetValue(),
             )
         except RecorderError as exc:
             try:
@@ -886,11 +936,17 @@ class AudioRecorderDialog(wx.Frame):
             self.bit_depth_choice,
             self.format_choice,
             self.bitrate_choice,
+            self.enhance_choice,
+            self.exclusive_check,
         ):
             control.Disable()
 
         self._ui_timer.Start(200)
-        self.announcer.announce(self.tr.t("recorder_announce_started"))
+        started = self.tr.t("recorder_announce_started")
+        # الحصري طُلب ورفضه الكرت: المستخدم يعرف أن التسجيل بالمشترك
+        if self.recorder.exclusive_requested and not self.recorder.used_exclusive:
+            started += ". " + self.tr.t("recorder_exclusive_fallback")
+        self.announcer.announce(started)
 
     def _on_pause_resume(self, event):
         if self.recorder.is_paused:
@@ -956,6 +1012,8 @@ class AudioRecorderDialog(wx.Frame):
             self.bit_depth_choice,
             self.format_choice,
             self.bitrate_choice,
+            self.enhance_choice,
+            self.exclusive_check,
         ):
             control.Enable()
 

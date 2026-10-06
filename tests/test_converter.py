@@ -174,3 +174,32 @@ def test_flexible_codecs_support_high_sample_rates():
 def test_lossless_codecs_have_no_sample_rate_restriction():
     for codec in ("pcm_s16le", "pcm_s16be", "pcm_u8", "flac", "alac", "tta", "wavpack"):
         assert get_audio_sample_rate_options(codec) is None
+
+
+def test_highest_quality_does_not_inflate_a_lossy_source(tmp_path):
+    """MP3 بـ128 إلى MP3 بـ«أعلى جودة» يبقى قريبًا من 128 لا 320."""
+    av = pytest.importorskip("av")
+    from core.converter import convert_file
+    from tests.media_samples import write_sample_media
+
+    source = str(tmp_path / "in.mp3")
+    write_sample_media(source, seconds=2, with_video=False, audio_codec="libmp3lame",
+                       audio_bit_rate=128_000)
+    target = str(tmp_path / "out.mp3")
+    convert_file(source, target, ".mp3", False, 0)
+    with av.open(target) as container:
+        assert container.streams.audio[0].codec_context.bit_rate <= 160_000
+
+
+def test_sample_rate_the_format_cannot_take_is_lowered(tmp_path):
+    """ملف 96 كيلوهرتز إلى MP3 كان يفشل؛ الآن ينزل لـ48."""
+    av = pytest.importorskip("av")
+    from core.converter import convert_file
+    from tests.media_samples import write_sample_media
+
+    source = str(tmp_path / "hi.wav")
+    write_sample_media(source, seconds=1, with_video=False, audio_codec="pcm_s16le", rate=96_000)
+    target = str(tmp_path / "hi.mp3")
+    convert_file(source, target, ".mp3", False, 0)
+    with av.open(target) as container:
+        assert container.streams.audio[0].codec_context.sample_rate == 48_000

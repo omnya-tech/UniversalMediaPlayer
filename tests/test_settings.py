@@ -180,23 +180,77 @@ def test_batch_still_saves_when_exception_raised_inside(tmp_path):
     assert on_disk["volume"] == 77
 
 
-def test_default_output_folders_are_nested_under_one_app_folder_and_follow_language(tmp_path):
-    settings_path = str(tmp_path / "settings.json")
-    settings = Settings(path=settings_path)
+def _settings_in(tmp_path, monkeypatch, language="ar"):
+    monkeypatch.setattr("core.settings.get_documents_dir", lambda: str(tmp_path))
+    settings = Settings(path=str(tmp_path / "settings.json"))
+    settings.set_language(language)
+    return settings
 
-    ar_converter = settings.get_converter_output_folder()
-    ar_recorder = settings.get_recorder_output_folder()
-    assert os.path.join("مشغل الوسائط الشامل - Omnya", "ملفات محوّلة") in ar_converter
-    assert os.path.join("مشغل الوسائط الشامل - Omnya", "تسجيلات صوتية") in ar_recorder
-    # المجلدين لازم يكونوا جوه نفس المجلد الأب (مشغل الوسائط الشامل -
-    # Omnya)، مش منفصلين مباشرة في المستندات زي قبل كده
-    assert os.path.dirname(ar_converter) == os.path.dirname(ar_recorder)
 
-    settings.set_language("en")
-    en_converter = settings.get_converter_output_folder()
-    en_recorder = settings.get_recorder_output_folder()
-    assert os.path.join("مشغل الوسائط الشامل - Omnya", "Converted Files") in en_converter
-    assert os.path.join("مشغل الوسائط الشامل - Omnya", "Voice Recordings") in en_recorder
+def _folders(settings):
+    return (settings.get_recorder_output_folder(), settings.get_converter_output_folder(),
+            settings.get_editor_output_folder(False), settings.get_editor_output_folder(True))
+
+
+def test_folder_names_follow_the_language_of_the_first_run_only(tmp_path, monkeypatch):
+    """
+    الأسماء بلغة البرنامج أول مرة، ثم لا تتغير.
+
+    تبعيتها للغة صنعت نسخًا مكررة في الإصدارات السابقة، وتغيير اسمها مع
+    اللغة كان سيكسر العلامات ومواضع الاستكمال المحفوظة بمسارات كاملة.
+    """
+    settings = _settings_in(tmp_path, monkeypatch, "en")
+    root = tmp_path / "Universal Media Player"
+    assert _folders(settings) == (str(root / "Recordings"), str(root / "Converted Files"),
+                                  str(root / "Media Editor" / "Audio"), str(root / "Media Editor" / "Video"))
+    settings.set_language("ar")
+    assert settings.get_recorder_output_folder() == str(root / "Recordings")
+    # ويبقى بعد إعادة التشغيل
+    reloaded = Settings(path=str(tmp_path / "settings.json"))
+    assert reloaded.get_converter_output_folder() == str(root / "Converted Files")
+
+
+def test_arabic_first_run_uses_arabic_names(tmp_path, monkeypatch):
+    settings = _settings_in(tmp_path, monkeypatch, "ar")
+    root = tmp_path / "مشغل الوسائط الشامل - Omnya"
+    assert _folders(settings) == (str(root / "التسجيلات"), str(root / "الملفات المحولة"),
+                                  str(root / "محرر الوسائط" / "صوت"), str(root / "محرر الوسائط" / "فيديو"))
+
+
+def test_a_taken_name_gets_a_number_and_is_left_alone(tmp_path, monkeypatch):
+    # مجلد للمستخدم بالاسم نفسه (على جهاز التطوير هو مجلد المشروع)
+    taken = tmp_path / "Universal Media Player"
+    taken.mkdir()
+    (taken / "main.py").write_text("x", encoding="utf-8")
+    settings = _settings_in(tmp_path, monkeypatch, "en")
+    assert settings.get_recorder_output_folder() == str(tmp_path / "Universal Media Player 1" / "Recordings")
+    assert sorted(p.name for p in taken.iterdir()) == ["main.py"]
+
+
+def test_previous_versions_folder_is_kept_and_its_old_folders_merged(tmp_path, monkeypatch):
+    root = tmp_path / "مشغل الوسائط الشامل - Omnya"
+    for name, files in (("تسجيلات صوتية", ["a.wav"]), ("Voice Recordings", ["a.wav", "b.wav"]),
+                        ("ملفات محوّلة", ["c.mp3"])):
+        (root / name).mkdir(parents=True)
+        for file_name in files:
+            (root / name / file_name).write_text(name, encoding="utf-8")
+    # المجلد الرئيسي الثاني الذي صنعه المحوّل بالخطأ
+    stray = tmp_path / "مشغل الوسائط الشامل" / "ملفات محوّلة"
+    stray.mkdir(parents=True)
+    (stray / "d.mp3").write_text("x", encoding="utf-8")
+
+    settings = _settings_in(tmp_path, monkeypatch, "ar")
+    # مجلد محفوظ هو الافتراضي القديم يُعامل كالافتراضي
+    settings.set_recorder_output_folder(str(root / "تسجيلات صوتية"))
+    assert settings.migrate_legacy_output_folders() == 5
+
+    recordings = root / "التسجيلات"
+    # الاسم المكرر لا يُكتب فوقه: يأخذ رقمًا
+    assert sorted(p.name for p in recordings.iterdir()) == ["a (2).wav", "a.wav", "b.wav"]
+    assert sorted(p.name for p in (root / "الملفات المحولة").iterdir()) == ["c.mp3", "d.mp3"]
+    assert sorted(p.name for p in root.iterdir()) == ["التسجيلات", "الملفات المحولة"]
+    assert not (tmp_path / "مشغل الوسائط الشامل").exists()
+    assert settings.get_recorder_output_folder() == str(recordings)
 
 
 def test_custom_output_folder_overrides_language_based_default(tmp_path):
@@ -239,7 +293,10 @@ def test_recorder_default_bit_depth_default_roundtrip_and_validation(tmp_path):
     reloaded = Settings(path=settings_path)
     assert reloaded.get_recorder_default_bit_depth() == 32
 
-    # أي قيمة غير 16/32 لازم ترجع لـ 16 (القيمة القياسية) بدل قبولها
-    # كما هي أو التعطل
     settings.set_recorder_default_bit_depth(24)
+    assert settings.get_recorder_default_bit_depth() == 24
+
+    # أي قيمة غير 16/24/32 لازم ترجع لـ 16 (القيمة القياسية) بدل قبولها
+    # كما هي أو التعطل
+    settings.set_recorder_default_bit_depth(20)
     assert settings.get_recorder_default_bit_depth() == 16
