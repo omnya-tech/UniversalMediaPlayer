@@ -7,18 +7,16 @@
 
 import logging
 import os
-import threading
 import time
 
 import wx
 
 from core.engine import PlayerEngine, PlaybackState
-from core.logging_setup import get_app_data_dir
-from core.playlist import Playlist, SUPPORTED_EXTENSIONS, is_video_extension
+from core.playlist import Playlist, SUPPORTED_EXTENSIONS
 from core.playlist_files import is_playlist_file
 from core.settings import Settings
 from core.streams import is_stream_url
-from accessibility.announcer import ScreenReaderAnnouncer, _resource_path
+from accessibility.announcer import ScreenReaderAnnouncer
 from i18n.strings import Translator
 from gui import player_icons
 from gui.format_utils import format_time
@@ -26,11 +24,15 @@ from gui import theme
 from gui.bookmarks_mixin import BookmarksMixin
 from gui.editor_hotkeys import EditorHotkeysMixin
 from gui.equalizer_mixin import EqualizerMixin
-from gui.playlist_mixin import PlaylistMixin, open_media_wildcard
+from gui.playlist_mixin import PlaylistMixin
 from gui.sleep_timer_mixin import SleepTimerDialog, SleepTimerMixin
 from gui.seeking_mixin import SeekingMixin
 from gui.tools_mixin import ToolsMixin
 from core.version import APP_VERSION
+from gui.keyboard_mixin import KeyboardMixin
+from gui.announce_mixin import AnnounceMixin
+from gui.file_open_mixin import FileOpenMixin
+from gui.window_layout_mixin import WindowLayoutMixin
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +131,8 @@ class _MediaDropTarget(wx.FileDropTarget):
 
 
 
-class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin,
+class MainWindow(WindowLayoutMixin, FileOpenMixin, AnnounceMixin, KeyboardMixin,
+                 BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin,
                  EqualizerMixin, PlaylistMixin, EditorHotkeysMixin, wx.Frame):
     # مقادير التقديم والإرجاع يضبطها المستخدم من الخيارات (تبويب التشغيل
     # والتنقل)؛ خصائص بنفس أسماء الثوابت القديمة فتبقى كل الاستدعاءات كما هي
@@ -139,37 +142,12 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin,
     SEEK_ALT_SECONDS = property(lambda self: self.settings.get_seek_step("alt"))
     SEEK_CTRL_SHIFT_SECONDS = property(lambda self: self.settings.get_seek_step("ctrl_shift"))
     MAX_VOLUME = 100
-    _MEDIA_HOTKEY_PLAY_PAUSE = 0xB301
-    _MEDIA_HOTKEY_STOP = 0xB302
-    _MEDIA_HOTKEY_NEXT = 0xB303
-    _MEDIA_HOTKEY_PREV = 0xB304
     def _update_window_title(self):
         base_title = f"{self.tr.t('app_title')} {APP_VERSION}"
         if self._current_file_name:
             self.SetTitle(f"{self._current_file_name} — {base_title}")
         else:
             self.SetTitle(base_title)
-
-    def _set_app_icon(self):
-        icon_path = _resource_path("resources", "omnya_icon.ico")
-        try:
-            if os.path.isfile(icon_path):
-                self.SetIcon(wx.Icon(icon_path, wx.BITMAP_TYPE_ICO))
-        except Exception:
-            pass
-
-    def _load_background_image(self):
-        candidates = [
-            _resource_path("resources", "background.png"), _resource_path("resources", "background.jpg"),
-            _resource_path("background.png"), os.path.join(get_app_data_dir(), "background.png"),
-        ]
-        for path in candidates:
-            if os.path.isfile(path):
-                try:
-                    img = wx.Image(path, wx.BITMAP_TYPE_ANY)
-                    if img.IsOk(): return img
-                except Exception: pass
-        return None
 
     def __init__(self, lang=None):
         self.settings = Settings()
@@ -256,35 +234,6 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin,
         if not self._restore_window_geometry():
             self.Centre()
 
-    def _restore_window_geometry(self):
-        """
-        يرجّع النافذة لحجمها وموضعها الأخيرين.
-
-        بنتأكد إن الموضع لسه على شاشة موجودة: المستخدم ممكن يكون فصل شاشة
-        تانية، والنافذة ساعتها كانت هتفتح برّه حدود المعروض ويبقى مستحيل
-        يوصلها - وده أسوأ بكتير من إنها تفتح في النص.
-        """
-        geometry = self.settings.get_window_geometry()
-        if not geometry:
-            return False
-        width, height, x, y = geometry
-        if wx.Display.GetFromPoint(wx.Point(x + width // 2, y + 20)) == wx.NOT_FOUND:
-            return False
-        self.SetSize(width, height)
-        self.SetPosition(wx.Point(x, y))
-        return True
-
-    def _save_window_geometry(self):
-        # المصغّرة والمكبّرة وملء الشاشة مش حجم المستخدم الحقيقي
-        if self.IsIconized() or self.IsMaximized() or self.IsFullScreen():
-            return
-        try:
-            width, height = self.GetSize()
-            x, y = self.GetPosition()
-            self.settings.set_window_geometry(width, height, x, y)
-        except Exception:
-            pass
-
     def _enforce_focusless_behavior(self):
         def _block_nav(event): pass
         def _force_focus(event):
@@ -298,48 +247,6 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin,
         self.header_panel.Bind(wx.EVT_NAVIGATION_KEY, _block_nav)
         for child in self.controls_panel.GetChildren(): child.Bind(wx.EVT_SET_FOCUS, _force_focus)
         for child in self.header_panel.GetChildren(): child.Bind(wx.EVT_SET_FOCUS, _force_focus)
-
-    def _announce(self, text: str, setting_key: str = None, force: bool = False):
-        if not text: return
-        if not force:
-            # الفحص كله في الإعدادات: المفتاح الرئيسي ثم المفتاح المحدد
-            # (شوف Settings.is_announcement_enabled)
-            # force للإعلانات اللي المستخدم طلبها صراحةً
-            if not self.settings.is_announcement_enabled(setting_key): return
-        if hasattr(self, "announcer") and self.announcer:
-            self.announcer.announce(text)
-
-    def _announce_seek(self, position: float, seek_type: str = "seconds",
-                       jump_seconds: float = None):
-        """
-        ينطق الموضع بعد قفزة.
-
-        jump_seconds هو مقدار القفزة. لو المستخدم ضابط حدًّا أدنى في
-        الخيارات، القفزات الأصغر منه بتفضل ساكتة - علشان الضغط المتكرر
-        على سهم العشر ثواني ما يبقاش ثرثرة. قفزات لوحة الأرقام والذهاب
-        لوقت محدد بتتعلن دايمًا: دي نقلة مقصودة لمكان بعينه.
-        """
-        mode = "all"
-        if hasattr(self.settings, "get_announce_seek_mode"):
-            try: mode = self.settings.get_announce_seek_mode()
-            except Exception: pass
-        if mode == "disabled": return
-
-        if jump_seconds is not None:
-            try:
-                minimum = self.settings.get_announce_seek_min_seconds()
-            except Exception:
-                minimum = 0
-            if minimum and abs(jump_seconds) < minimum:
-                return
-
-        should_announce = False
-        if mode in ("enabled", "all"): should_announce = True
-        elif mode == "seconds_only" and seek_type in ("seconds", "numpad"): should_announce = True
-        elif mode == "minutes_only" and seek_type in ("minutes", "numpad"): should_announce = True
-        if should_announce:
-            msg = self.tr.t("announce_seek_position", time=format_time(position))
-            self._announce(msg)
 
     def _build_omnya_ui(self):
         self._build_menu()
@@ -578,63 +485,6 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin,
         self.controls_panel.Layout()
         self.header_panel.Layout()
 
-    def _apply_ui_theme(self):
-        """
-        ألوان النافذة من مظهر البرنامج (gui/theme.py).
-
-        المظهر يُحسم عند البدء؛ وفي التباين العالي لا لون من البرنامج
-        (theme.colour يرجع لون النظام).
-        """
-        c = theme.colour
-        self.main_panel.SetBackgroundColour(c("main_bg"))
-        self.header_panel.SetBackgroundColour(c("header_bg"))
-        self.controls_panel.SetBackgroundColour(c("controls_bg"))
-
-        self.file_label.SetForegroundColour(c("header_text"))
-        self.media_info_label.SetForegroundColour(c("header_secondary"))
-        self.sleep_timer_badge.SetForegroundColour(c("badge"))
-
-        self.time_current_label.SetForegroundColour(c("time_text"))
-        self.time_remaining_total_label.SetForegroundColour(c("time_remaining"))
-        self.volume_label.SetForegroundColour(c("volume_text"))
-        self.vol_pct_label.SetForegroundColour(c("volume_text"))
-
-        for btn in [self.previous_button, self.seek_backward_button, self.stop_button, self.seek_forward_button, self.next_button]:
-            btn.SetBackgroundColour(c("button_bg"))
-            btn.SetForegroundColour(c("button_fg"))
-
-        # زر التشغيل بمظهر ويندوز الأصلي: أزرار ويندوز تتجاهل لون النص، فلما
-        # تلوّنت خلفيته بالأزرق ظهر نصه باهتًا لا يكاد يُقرأ. يتميز بخطه العريض
-        self.play_pause_button.SetBackgroundColour(wx.NullColour)
-        self.play_pause_button.SetForegroundColour(c("play_fg"))
-
-        # الأيقونات مرسومة بلون نص الزر وقت رسمها، فلازم تترسم من جديد
-        # بعد تغيير الألوان وإلا تفضل بلون السمة القديمة
-        # (شوف _retint_button_icons)
-        # والرسم بعد الألوان مش قبلها.
-        self._retint_button_icons()
-        self.main_panel.Refresh()
-
-    def _retint_button_icons(self):
-        """يعيد رسم أيقونات الأزرار بلون نص كل زر."""
-        pairs = (
-            (self.stop_button, player_icons.stop_icon),
-            (self.seek_backward_button, player_icons.rewind_icon),
-            (self.previous_button, player_icons.previous_icon),
-            (self.next_button, player_icons.next_icon),
-            (self.seek_forward_button, player_icons.forward_icon),
-        )
-        for button, maker in pairs:
-            button.SetBitmap(maker(size=18, scale=self._icon_scale,
-                                   colour=button.GetForegroundColour()))
-        # زر التشغيل أيقونته بتتبع الحالة
-        playing = self.engine.state == PlaybackState.PLAYING
-        maker = player_icons.pause_icon if playing else player_icons.play_icon
-        self.play_pause_button.SetBitmap(
-            maker(size=18, scale=self._icon_scale,
-                  colour=self.play_pause_button.GetForegroundColour())
-        )
-
     def _build_menu(self):
         menubar = wx.MenuBar()
 
@@ -763,119 +613,6 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin,
     def _format_seek_help_text(self):
         return self.tr.t("help_seek", **self._seek_duration_kwargs())
 
-    def _register_global_media_keys(self):
-        if not self.settings.get_enable_global_media_keys():
-            return
-        hotkeys = (
-            (self._MEDIA_HOTKEY_PLAY_PAUSE, getattr(wx, "WXK_MEDIA_PLAY_PAUSE", 0xB3)),
-            (self._MEDIA_HOTKEY_STOP, getattr(wx, "WXK_MEDIA_STOP", 0xB2)),
-            (self._MEDIA_HOTKEY_NEXT, getattr(wx, "WXK_MEDIA_NEXT_TRACK", 0xB0)),
-            (self._MEDIA_HOTKEY_PREV, getattr(wx, "WXK_MEDIA_PREV_TRACK", 0xB1)),
-        )
-        for hotkey_id, keycode in hotkeys:
-            try:
-                if self.RegisterHotKey(hotkey_id, wx.MOD_NONE, keycode):
-                    self._registered_media_hotkey_ids.add(hotkey_id)
-            except Exception:
-                pass
-
-    def _unregister_global_media_keys(self):
-        for hotkey_id in list(self._registered_media_hotkey_ids):
-            try: self.UnregisterHotKey(hotkey_id)
-            except Exception: pass
-        self._registered_media_hotkey_ids.clear()
-
-    def _refresh_global_media_keys(self):
-        self._unregister_global_media_keys()
-        self._register_global_media_keys()
-
-    def _on_global_media_hotkey(self, event):
-        hotkey_id = event.GetId()
-        if hotkey_id == self._MEDIA_HOTKEY_PLAY_PAUSE:
-            self._on_play_pause(event)
-        elif hotkey_id == self._MEDIA_HOTKEY_STOP:
-            self._on_stop(event)
-        elif hotkey_id == self._MEDIA_HOTKEY_NEXT:
-            self._on_next(event)
-        elif hotkey_id == self._MEDIA_HOTKEY_PREV:
-            self._on_previous(event)
-        elif self.is_editor_hotkey(hotkey_id):
-            self._on_editor_hotkey(hotkey_id)
-
-    def _on_toggle_accessibility_shortcut(self, event):
-        current = True
-        if hasattr(self.settings, "get_announce_accessibility"):
-            try: current = self.settings.get_announce_accessibility()
-            except Exception: pass
-        elif hasattr(self.settings, "get_enable_accessibility"):
-            try: current = self.settings.get_enable_accessibility()
-            except Exception: pass
-        new_state = not current
-        for setter_name in ["set_announce_accessibility", "set_enable_accessibility", "set_announce_enabled", "set_accessibility_enabled"]:
-            if hasattr(self.settings, setter_name):
-                try: getattr(self.settings, setter_name)(new_state)
-                except Exception: pass
-        if hasattr(self.settings, "set"):
-            try:
-                self.settings.set("announce_accessibility", new_state)
-                self.settings.set("enable_accessibility", new_state)
-            except Exception: pass
-        msg_key = "announce_accessibility_enabled" if new_state else "announce_accessibility_disabled"
-        self._announce(self.tr.t(msg_key), force=True)
-
-    def _on_open(self, event):
-        with wx.FileDialog(
-            self,
-            self.tr.t("dialog_open_title"),
-            wildcard=open_media_wildcard(self.tr),
-            style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST,
-        ) as dlg:
-            dlg.SetFilterIndex(0)
-            if dlg.ShowModal() == wx.ID_CANCEL:
-                return
-            path = dlg.GetPath()
-        self._open_specific_path(path)
-
-    def _on_open_folder(self, event):
-        with wx.DirDialog(
-            self,
-            self.tr.t("dialog_open_folder_title"),
-            style=wx.DD_DEFAULT_STYLE | wx.DD_DIR_MUST_EXIST,
-        ) as dlg:
-            if dlg.ShowModal() == wx.ID_CANCEL:
-                return
-            folder = dlg.GetPath()
-        self._open_folder_path(folder)
-
-    def _open_folder_path(self, folder):
-        try: entries = sorted(os.listdir(folder), key=str.lower)
-        except OSError:
-            self._announce(self.tr.t("announce_folder_no_media"), "announce_navigation_blocked")
-            return
-        first_file = next((os.path.join(folder, n) for n in entries if os.path.splitext(n)[1].lower() in SUPPORTED_EXTENSIONS), None)
-        if first_file is None:
-            self._announce(self.tr.t("announce_folder_no_media"), "announce_navigation_blocked")
-            return
-        self._open_specific_path(first_file)
-
-    def _open_specific_path(self, path):
-        # روابط وملفات قوائم ليها طريقها (شوف PlaylistMixin._open_any)
-        if self._open_any(path):
-            return
-        if is_playlist_file(path) or is_stream_url(path):
-            # قائمة فشلت (والخطأ اتعرض): ما تتسلّمش لـ VLC كملف وسائط
-            return
-        self._save_current_position()
-        self.playlist.load_folder_of(path)
-        self._load_and_play(self.playlist.current or path)
-
-    def _open_album_paths(self, paths):
-        # فتح وتشغيل مجموعة ملفات كألبوم مترابط بالترتيب بدءاً من أول ملف
-        if not paths: return
-        self._save_current_position()
-        self.playlist.load_custom_list(paths, initial_path=paths[0])
-        self._load_and_play(self.playlist.current or paths[0])
-
     def _refresh_transport_buttons_state(self):
         has_file = self._current_file_path is not None and not self._is_loading_file
         self.play_pause_button.Enable(has_file)
@@ -885,147 +622,12 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin,
         self.previous_button.Enable(has_file and self.playlist.has_previous())
         self.next_button.Enable(has_file and self.playlist.has_next())
 
-    def _load_and_play(self, path):
-        if self._is_loading_file:
-            self._pending_open_path = path
-            return
-        self._pending_open_path = None
-        self._is_loading_file = True
-        self.status_bar.SetStatusText(self.tr.t("status_loading"))
-        self._update_info_labels()
-        self._refresh_transport_buttons_state()
-
-        # أول ملف بعد فتح البرنامج ممكن يستنى تجهيز المحرك (شوف
-        # PlayerEngine.warm_up). الانتظار ده بيتقال بدل سكوت محيّر.
-        # الطلب اللي بيوصل أثناء التحميل بيتحفظ ويتنفّذ بعده
-        # (شوف _on_file_opened) بدل ما يترمي.
-        # (ضغطة PageDown سريعة كانت بتضيع)
-        engine_ready = self.engine.is_ready
-        if not engine_ready:
-            self._announce(self.tr.t("status_engine_warming"), "announce_playback_state")
-
-        def worker():
-            ok = self.engine.open(path)
-            wx.CallAfter(self._on_file_opened, path, ok)
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _on_file_opened(self, path, ok):
-        self._is_loading_file = False
-
-        # طلب وصل أثناء التحميل (شوف _load_and_play): الأحدث هو اللي
-        # المستخدم عايزه، فبنفتحه بدل اللي خلص
-        pending = getattr(self, "_pending_open_path", None)
-        if pending is not None and pending != path:
-            self._pending_open_path = None
-            self._load_and_play(pending)
-            return
-        self._pending_open_path = None
-
-        if not ok:
-            self._refresh_transport_buttons_state()
-            return
-
-        is_stream = is_stream_url(path)
-        if is_stream:
-            self._current_format = self.tr.t("stream_format")
-        else:
-            self._current_format = os.path.splitext(path)[1].lstrip(".").upper()
-        self._current_file_path = path
-        self._current_file_name = self._display_name(path)
-        self._update_window_title()
-
-        # البث: الفيديو بيبان بعد ما يبدأ (شوف _apply_state_change)
-        has_video = False if is_stream else is_video_extension(os.path.splitext(path)[1])
-        self._apply_media_layout(has_video)
-
-        self.file_label.SetLabel(self._current_file_name)
-        self.file_label.SetName(self._current_file_name)
-
-        if self.engine.duration and self.engine.duration > 0:
-            duration_secs = int(self.engine.duration)
-            self.seek_slider.SetMax(duration_secs)
-            self.seek_slider.SetPageSize(max(1, duration_secs // 10))
-            self.seek_slider.SetLineSize(max(1, duration_secs // 50))
-        else:
-            self.seek_slider.SetMax(100)
-
-        self.seek_slider.SetValue(0)
-        self._update_info_labels()
-        self._refresh_transport_buttons_state()
-
-        self.settings.add_recent_file(path)
-        self._refresh_recent_files_menu()
-
-        # السرعة المحفوظة للملف ده (شوف Settings.get_file_speed)
-        saved_speed = self.settings.get_file_speed(path)
-        if abs(saved_speed - self.engine.speed) > 0.01:
-            self.engine.set_speed(saved_speed)
-        self._announce(self.tr.t("announce_file_loaded", name=self._current_file_name), "announce_file_loaded")
-
-        info = self.engine.get_media_info()
-        if is_stream:
-            self._announce(self.tr.t("announce_stream_info"), "announce_file_info")
-        elif info:
-            duration_text = format_time(info["duration"])
-            bit_rate = info.get("bit_rate")
-            if bit_rate:
-                kbps = int(bit_rate / 1000)
-                text = self.tr.t("announce_file_info", format=self._current_format, bitrate=kbps, duration=duration_text)
-            else:
-                text = self.tr.t("announce_file_info_no_bitrate", format=self._current_format, duration=duration_text)
-            self._announce(text, "announce_file_info")
-        if len(self.playlist) > 1:
-            self._announce(self.tr.t("announce_playlist_position", index=self.playlist.current_position, total=len(self.playlist)), "announce_playlist_position")
-
-        # إلغاء التركيز عن العناصر ونقله للنافذة الرئيسية للتحكم باختصارات لوحة المفاتيح
-        self.SetFocus()
-
-        # البث المباشر مالوش موضع يتستكمل منه
-        last_position = 0.0 if is_stream else self.settings.get_last_position(path)
-        if last_position > 1.0 and self.settings.get_auto_resume():
-            self.engine.play_and_seek(last_position)
-            self._announce(self.tr.t("announce_resume_position", time=format_time(last_position)), "announce_resume_position")
-        else: self.engine.play()
-
-        # قفزة اتطلبت والملف بيتحمّل (End أو أرقام النم باد بعد PageDown)
-        # بتتنفّذ دلوقتي إن المدة بقت معروفة.
-        # (شوف SeekingMixin._defer_until_duration_known)
-        # والمدة ممكن تكون لسه صفر هنا لو التحليل اتأخر؛ ساعتها بتضيع.
-        self._run_pending_seek()
-
-    def _refresh_recent_files_menu(self):
-        for item in list(self._recent_menu.GetMenuItems()):
-            self._recent_menu.Delete(item.GetId())
-
-        recent = self.settings.get_recent_files()
-        if not recent:
-            empty_item = self._recent_menu.Append(wx.ID_ANY, self.tr.t("menu_recent_files_empty"))
-            self._recent_menu.Enable(empty_item.GetId(), False)
-            return
-
-        for path in recent:
-            item = self._recent_menu.Append(wx.ID_ANY, self._display_name(path))
-            self.Bind(wx.EVT_MENU, lambda evt, p=path: self._open_specific_path(p), item)
-
     def _on_play_pause(self, event):
         self.engine.toggle_play_pause()
 
     def _on_stop(self, event):
         self.engine.stop()
         self._reset_playback_ui()
-
-    def _on_next(self, event):
-        self._advance_to(self.playlist.next(), no_target_key="announce_no_next_file")
-
-    def _on_previous(self, event):
-        self._advance_to(self.playlist.previous(), no_target_key="announce_no_previous_file")
-
-    def _advance_to(self, target_path, no_target_key):
-        if target_path is None:
-            self._announce(self.tr.t(no_target_key), "announce_navigation_blocked")
-            return
-        self._save_current_position()
-        self._load_and_play(target_path)
 
     def _save_current_position(self):
         if self._current_file_path and not is_stream_url(self._current_file_path):
@@ -1035,91 +637,6 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin,
         muted = not self.engine.is_muted
         self.engine.set_muted(muted)
         self._announce(self.tr.t("announce_muted" if muted else "announce_unmuted"), "announce_mute_toggle")
-
-    def _on_announce_time_status(self, event):
-        # الوقت الحالي وحده: المتبقي له R والمدة الكاملة لها E
-        current = self.engine.get_current_position()
-        message = self.tr.t("announce_time_status", current=format_time(current))
-        self.status_bar.SetStatusText(message)
-        self._announce_debounced(message, "announce_time_status")
-
-    def _on_announce_duration(self, event):
-        message = self.tr.t("announce_duration", total=format_time(self.engine.duration))
-        self.status_bar.SetStatusText(message)
-        self._announce_debounced(message, "announce_duration_announce")
-
-    def _on_toggle_fullscreen(self, event):
-        going_fullscreen = not self.IsFullScreen()
-        self.ShowFullScreen(going_fullscreen)
-
-        if going_fullscreen:
-            self.header_panel.Hide()
-            self.controls_panel.Hide()
-        else:
-            self.header_panel.Show()
-            self.controls_panel.Show()
-        self.main_panel.Layout()
-
-        message = self.tr.t("announce_fullscreen_on" if going_fullscreen else "announce_fullscreen_off")
-        self.status_bar.SetStatusText(message)
-        self._announce(message, "announce_fullscreen")
-
-    def _on_escape_exit_fullscreen(self, event):
-        if self.IsFullScreen():
-            self._on_toggle_fullscreen(event)
-        else:
-            event.Skip()
-
-    def _on_announce_remaining_time(self, event):
-        current = self.engine.get_current_position()
-        remaining = max(0.0, self.engine.duration - current)
-        message = self.tr.t("announce_remaining_only", remaining=format_time(remaining))
-        self.status_bar.SetStatusText(message)
-        self._announce_debounced(message, "announce_remaining_time")
-
-    def _announce_debounced(self, message, setting_key=None):
-        self._pending_manual_announce_message = (message, setting_key)
-        self._manual_announce_timer.Stop()
-        self._manual_announce_timer.Start(120, wx.TIMER_ONE_SHOT)
-
-    def _on_manual_announce_timer(self, event):
-        if self._pending_manual_announce_message is not None:
-            msg, key = self._pending_manual_announce_message
-            self._announce(msg, setting_key=key)
-            self._pending_manual_announce_message = None
-
-    def _apply_media_layout(self, has_video: bool):
-        if self._current_media_has_video == has_video:
-            if has_video:
-                self.video_panel.Show()
-                self.audio_spacer_panel.Hide()
-                self.engine.set_video_widget_handle(self.video_panel.GetHandle())
-                self.video_panel.Refresh()
-            else:
-                self.video_panel.Hide()
-                self.audio_spacer_panel.Show()
-                try: self.engine.set_video_widget_handle(0)
-                except Exception: pass
-                self.audio_spacer_panel.Refresh()
-            return
-
-        self._current_media_has_video = has_video
-
-        if has_video:
-            self.video_panel.Show()
-            self.audio_spacer_panel.Hide()
-            self.engine.set_video_widget_handle(self.video_panel.GetHandle())
-            self.video_panel.Refresh()
-        else:
-            self.video_panel.Hide()
-            self.audio_spacer_panel.Show()
-            try: self.engine.set_video_widget_handle(0)
-            except Exception: pass
-            self.audio_spacer_panel.Refresh()
-
-        self.main_panel.Layout()
-        self.Layout()
-        self.Refresh()
 
     def _on_go_to_time(self, event):
         """
@@ -1417,180 +934,3 @@ class MainWindow(BookmarksMixin, SeekingMixin, SleepTimerMixin, ToolsMixin,
         self.vol_pct_label.SetLabel(f"{new_value}%")
         self.controls_panel.Layout()
         self._announce(self.tr.t("announce_volume", percent=new_value), "announce_volume_changes")
-
-    def _bind_shortcuts(self):
-        accel_entries = []
-
-        def bind(modifier, key, handler):
-            new_id = wx.NewIdRef()
-            self.Bind(wx.EVT_MENU, handler, id=new_id)
-            accel_entries.append(wx.AcceleratorEntry(modifier, key, new_id))
-
-        bind(wx.ACCEL_NORMAL, wx.WXK_UP, lambda e: self._volume_relative(5))
-        bind(wx.ACCEL_NORMAL, wx.WXK_DOWN, lambda e: self._volume_relative(-5))
-        bind(wx.ACCEL_CTRL, wx.WXK_UP, lambda e: self._volume_relative(20))
-        bind(wx.ACCEL_CTRL, wx.WXK_DOWN, lambda e: self._volume_relative(-20))
-        bind(wx.ACCEL_NORMAL, ord("M"), lambda e: self._on_toggle_mute(e))
-
-        bind(wx.ACCEL_CTRL, wx.WXK_SPACE, self._on_stop)
-
-        bind(wx.ACCEL_NORMAL, ord("R"), self._on_announce_remaining_time)
-        bind(wx.ACCEL_NORMAL, ord("E"), self._on_announce_duration)
-        bind(wx.ACCEL_NORMAL, ord("T"), self._on_announce_time_status)
-        bind(wx.ACCEL_NORMAL, ord("N"), self._on_announce_stream_title)
-
-        bind(wx.ACCEL_SHIFT, ord("Q"), lambda e: self._cycle_equalizer(-1))
-        bind(wx.ACCEL_NORMAL, ord("Q"), lambda e: self._cycle_equalizer(1))
-        bind(wx.ACCEL_CTRL, ord("E"), self._on_equalizer)
-        bind(wx.ACCEL_CTRL, ord("U"), self._on_open_url)
-        bind(wx.ACCEL_CTRL, ord("L"), self._on_playlist_dialog)
-        bind(wx.ACCEL_CTRL, ord("S"), self._on_save_playlist)
-
-        bind(wx.ACCEL_CTRL | wx.ACCEL_SHIFT, ord("R"), self._on_recorder)
-        bind(wx.ACCEL_CTRL, ord("R"), self._on_start_recording_shortcut)
-        bind(wx.ACCEL_CTRL | wx.ACCEL_SHIFT, ord("X"), self._on_media_editor)
-
-        bind(wx.ACCEL_CTRL | wx.ACCEL_SHIFT, ord("P"), self._on_options)
-
-        bind(wx.ACCEL_CTRL | wx.ACCEL_ALT, ord("A"), self._on_toggle_accessibility_shortcut)
-        bind(wx.ACCEL_CTRL | wx.ACCEL_SHIFT, ord("H"), self._on_export_shortcuts_doc)
-        # تقرير التشخيص (شوف ToolsMixin._on_export_diagnostics)
-        bind(wx.ACCEL_CTRL | wx.ACCEL_SHIFT, ord("D"), self._on_export_diagnostics)
-
-        if self.settings.get_enable_folder_navigation():
-            bind(wx.ACCEL_NORMAL, wx.WXK_PAGEDOWN, self._on_next)
-            bind(wx.ACCEL_NORMAL, wx.WXK_PAGEUP, self._on_previous)
-
-        numpad_keys = (wx.WXK_NUMPAD1, wx.WXK_NUMPAD2, wx.WXK_NUMPAD3, wx.WXK_NUMPAD4, wx.WXK_NUMPAD5, wx.WXK_NUMPAD6, wx.WXK_NUMPAD7, wx.WXK_NUMPAD8, wx.WXK_NUMPAD9)
-        for index, numpad_key in enumerate(numpad_keys, start=1):
-            bind(wx.ACCEL_NORMAL, numpad_key, lambda e, p=index * 10: self._seek_to_percent(p))
-
-        bind(wx.ACCEL_NORMAL, wx.WXK_NUMPAD0, lambda e: self._seek_to_start())
-        bind(wx.ACCEL_NORMAL, wx.WXK_HOME, lambda e: self._seek_to_start())
-        bind(wx.ACCEL_NORMAL, wx.WXK_END, lambda e: self._seek_to_near_end())
-
-        bind(wx.ACCEL_ALT, wx.WXK_UP, lambda e: self._change_speed(0.25))
-        bind(wx.ACCEL_ALT, wx.WXK_DOWN, lambda e: self._change_speed(-0.25))
-        bind(wx.ACCEL_ALT, wx.WXK_NUMPAD0, lambda e: self._reset_speed())
-
-        bind(wx.ACCEL_CTRL, ord("G"), self._on_go_to_time)
-
-        # Ctrl+Alt+B قبل Ctrl+B: جدول المسرّعات بياخد أول تطابق
-        bind(wx.ACCEL_CTRL | wx.ACCEL_ALT, ord("B"), lambda e: self._rename_bookmark())
-        bind(wx.ACCEL_CTRL, ord("B"), lambda e: self._add_bookmark())
-        bind(wx.ACCEL_NORMAL, wx.WXK_F2, lambda e: self._jump_bookmark(forward=True))
-        bind(wx.ACCEL_SHIFT, wx.WXK_F2, lambda e: self._jump_bookmark(forward=False))
-        bind(wx.ACCEL_CTRL | wx.ACCEL_SHIFT, ord("B"), lambda e: self._clear_bookmarks())
-
-        bind(wx.ACCEL_NORMAL, wx.WXK_F11, self._on_toggle_fullscreen)
-        bind(wx.ACCEL_NORMAL, wx.WXK_ESCAPE, self._on_escape_exit_fullscreen)
-
-        self.SetAcceleratorTable(wx.AcceleratorTable(accel_entries))
-
-    def _start_hold_seek(self, keycode, initial_delta_seconds):
-        if not self._is_holding_seek:
-            self._is_holding_seek = True
-            self._holding_key = keycode
-            self._seek_speed_multiplier = 1.0
-            self._hold_target_position = self.engine.get_effective_position()
-            # نقطة البداية علشان مقدار القفزة الكلي يتحسب عند الإفلات
-            # (شوف _announce_seek وحدّ الإعلان الأدنى)
-            self._hold_start_position = self._hold_target_position
-            self.engine.set_muted(True)
-            # الضغطة الأولى بالمقدار المضبوط بالضبط: كان المعامل يكبر قبلها
-            # فتقفز الضغطة الواحدة 12.5 ثانية بدل 10. التسارع للضغط المطوّل
-            self._step_hold_seek(initial_delta_seconds, accelerate=False)
-            self._hold_seek_timer.Start(80)
-
-    def _step_hold_seek(self, base_delta, accelerate=True):
-        if not self.engine.duration:
-            return
-        if self._hold_target_position is None:
-            self._hold_target_position = self.engine.get_effective_position()
-
-        if accelerate:
-            self._seek_speed_multiplier = min(60.0, self._seek_speed_multiplier * 1.25)
-        step = base_delta * self._seek_speed_multiplier
-
-        self._hold_target_position = max(0.0, min(self.engine.duration, self._hold_target_position + step))
-        self.seek_slider.SetValue(int(self._hold_target_position))
-        self._update_info_labels(is_seeking=True, seek_target=self._hold_target_position)
-
-    def _on_hold_seek_timer(self, event):
-        if not (wx.GetKeyState(wx.WXK_RIGHT) or wx.GetKeyState(wx.WXK_LEFT)):
-            self._stop_hold_seek()
-            return
-
-        if self._holding_key in (wx.WXK_RIGHT, wx.WXK_LEFT):
-            base_delta = 1.5 if self._holding_key == wx.WXK_RIGHT else -1.5
-            self._step_hold_seek(base_delta)
-        else:
-            self._stop_hold_seek()
-
-    def _stop_hold_seek(self):
-        if self._is_holding_seek:
-            self._is_holding_seek = False
-            self._holding_key = None
-            self._hold_seek_timer.Stop()
-
-            if hasattr(self, '_hold_target_position') and self._hold_target_position is not None:
-                self.engine.seek(self._hold_target_position)
-                self._last_seek_time = time.time()
-                target = self._hold_target_position
-                self._hold_target_position = None
-                start = getattr(self, "_hold_start_position", None)
-                jump = target - start if start is not None else None
-                self._hold_start_position = None
-                self._announce_seek(target, seek_type="seconds", jump_seconds=jump)
-
-            self.engine.set_muted(False)
-            self._update_info_labels()
-
-    def _on_key_up(self, event):
-        keycode = event.GetKeyCode()
-        if keycode in (wx.WXK_RIGHT, wx.WXK_LEFT) and self._holding_key == keycode:
-            self._stop_hold_seek()
-        event.Skip()
-
-    def _on_char_hook(self, event):
-        keycode = event.GetKeyCode()
-        # Tab مقفول: التنقّل بين الأزرار ممنوع (شوف _enforce_focusless_behavior)
-        if keycode == wx.WXK_TAB: return
-        alt = event.AltDown()
-        ctrl = event.ControlDown() or event.CmdDown()
-        shift = event.ShiftDown()
-
-        focused = wx.Window.FindFocus()
-        interactive_controls = (wx.Button, wx.TextCtrl, wx.CheckBox, wx.ComboBox, wx.ListBox, wx.RadioButton, wx.SpinCtrl)
-
-        if focused and isinstance(focused, interactive_controls):
-            if keycode in (wx.WXK_SPACE, wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER):
-                event.Skip()
-                return
-
-        if keycode in (wx.WXK_RIGHT, wx.WXK_LEFT):
-            delta = self.SEEK_NORMAL_SECONDS
-            if ctrl and shift: delta = self.SEEK_CTRL_SHIFT_SECONDS
-            elif ctrl: delta = self.SEEK_CTRL_SECONDS
-            elif shift: delta = self.SEEK_SHIFT_SECONDS
-            elif alt: delta = self.SEEK_ALT_SECONDS
-
-            if keycode == wx.WXK_LEFT: delta = -delta
-
-            if not (alt or ctrl or shift):
-                if self._holding_key != keycode:
-                    self._holding_key = keycode
-                    self._start_hold_seek(keycode, delta)
-            else:
-                self._seek_relative(delta)
-            return
-
-        if keycode == wx.WXK_SPACE:
-            if ctrl and not (alt or shift):
-                self._on_stop(event)
-                return
-            elif not (alt or ctrl or shift):
-                self._on_play_pause(event)
-                return
-
-        event.Skip()
