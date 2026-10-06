@@ -24,6 +24,7 @@ from core.audio_recorder import (
 )
 from core.audio_devices import group_devices, recommended_profile, supported_rates, looks_like_system_audio
 from core.formats import AUDIO_FORMATS
+from core.mic_level import MicLevel
 from core.voice_enhance import DEFAULT_ENHANCE_LEVEL, ENHANCE_LEVELS
 from core.logging_setup import configure_logging
 from core.version import APP_VERSION
@@ -122,6 +123,8 @@ class AudioRecorderDialog(wx.Frame):
                                       on_error=self._on_error, tr=tr)
         self._last_level = (0.0, 0.0)
         self._clipping_warning_shown = False
+        # مستوى المايك المختار في ويندوز (شوف _refresh_mic_level)
+        self._mic_level = None
 
         self._temp_wav_path = None
         default_format = self.settings.get_recorder_default_format() if self.settings is not None else ".wav"
@@ -212,6 +215,26 @@ class AudioRecorderDialog(wx.Frame):
         dev_pri_row.Add(lbl_dev_pri, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=8)
         dev_pri_row.Add(self.device_choice, proportion=1, flag=wx.ALIGN_CENTER_VERTICAL)
         settings_sizer.Add(dev_pri_row, flag=wx.EXPAND | wx.ALL, border=6)
+
+        # مستوى المايك في ويندوز: التشبّع بيحصل داخل المايك، فالحل الوحيد
+        # تخفيض مستواه هو، وبيتغيّر أثناء التسجيل وعين المستخدم على المؤشر
+        # (شوف core/mic_level.py)
+        level_row = wx.BoxSizer(wx.HORIZONTAL)
+        self.mic_level_label = wx.StaticText(panel, label=tr.t("recorder_mic_level_label"))
+        self.mic_level_slider = wx.Slider(panel, value=100, minValue=0, maxValue=100)
+        self.mic_level_slider.SetName(tr.t("recorder_mic_level_label"))
+        self.mic_level_slider.SetToolTip(tr.t("recorder_mic_level_hint"))
+        self.mic_level_slider.SetPageSize(10)
+        self.mic_level_value = wx.StaticText(panel, label="", size=(48, -1))
+        self.mic_level_value.SetLayoutDirection(wx.Layout_LeftToRight)
+        self.Bind(wx.EVT_SLIDER, self._on_mic_level_change, self.mic_level_slider)
+        level_row.Add(self.mic_level_label, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=8)
+        level_row.Add(self.mic_level_slider, proportion=1, flag=wx.ALIGN_CENTER_VERTICAL)
+        level_row.Add(self.mic_level_value, flag=wx.ALIGN_CENTER_VERTICAL | wx.LEFT, border=6)
+        settings_sizer.Add(level_row, flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, border=6)
+        self.mic_level_note = wx.StaticText(panel, label="")
+        self.mic_level_note.Hide()
+        settings_sizer.Add(self.mic_level_note, flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, border=6)
 
         # خيار دمج جهاز إدخال ثانٍ (الستيريو ميكس)
         self.chk_dual_input = wx.CheckBox(panel, label=tr.t("recorder_dual_input"))
@@ -388,6 +411,9 @@ class AudioRecorderDialog(wx.Frame):
         self.SetSizer(outer)
 
         self._describe_controls()
+        self._refresh_mic_level()
+        # ويندوز ممكن يغيّر المستوى من بره (إعدادات الصوت أو برنامج تاني)
+        self.Bind(wx.EVT_ACTIVATE, self._on_activate)
 
         self._ui_timer = wx.Timer(self)
         self.Bind(wx.EVT_TIMER, self._on_ui_timer, self._ui_timer)
@@ -417,6 +443,7 @@ class AudioRecorderDialog(wx.Frame):
             (self.pause_button, "recorder_pause_button", "recorder_pause_button_hint"),
             (self.stop_button, "recorder_stop_button", "recorder_stop_button_hint"),
             (self.mic_check_button, "mic_check_button", "mic_check_button_hint"),
+            (self.mic_level_slider, "recorder_mic_level_label", "recorder_mic_level_hint"),
         )
         for control, name_key, hint_key in described:
             try:
@@ -511,6 +538,56 @@ class AudioRecorderDialog(wx.Frame):
 
     def _on_capabilities_changed(self, event):
         self._refresh_capabilities()
+        self._refresh_mic_level()
+
+    def _refresh_mic_level(self):
+        """يربط الشريط بمستوى الجهاز المختار في ويندوز، أو يعطّله لو مش متاح."""
+        if self._mic_level is not None:
+            self._mic_level.close()
+            self._mic_level = None
+        selection = self.device_choice.GetSelection()
+        devices = getattr(self, "_audio_devices", None) or []
+        if 0 <= selection < len(devices):
+            try:
+                self._mic_level = MicLevel.open(devices[selection].name)
+            except Exception:
+                _logger.exception("تعذّر فتح مستوى المايكروفون في ويندوز")
+
+        level = self._mic_level.get() if self._mic_level is not None else None
+        available = level is not None
+        for control in (self.mic_level_label, self.mic_level_slider, self.mic_level_value):
+            control.Enable(available)
+        if available:
+            self._show_mic_level(level)
+            note = "" if self._mic_level.hardware else self.tr.t("recorder_mic_level_software")
+        else:
+            self.mic_level_value.SetLabel("")
+            note = self.tr.t("recorder_mic_level_unavailable") if devices else ""
+        self.mic_level_note.SetLabel(note)
+        self.mic_level_note.Wrap(500)
+        self.mic_level_note.Show(bool(note))
+        self.Layout()
+
+    def _show_mic_level(self, level):
+        self.mic_level_slider.SetValue(level)
+        self.mic_level_value.SetLabel(self.tr.t("recorder_mic_level_value", level=level))
+
+    def _on_mic_level_change(self, event):
+        level = self.mic_level_slider.GetValue()
+        if self._mic_level is None or not self._mic_level.set(level):
+            # الجهاز اتفصل: الشريط يرجع يعكس الحقيقة
+            self._refresh_mic_level()
+            return
+        self.mic_level_value.SetLabel(self.tr.t("recorder_mic_level_value", level=level))
+
+    def _on_activate(self, event):
+        if event.GetActive() and self._mic_level is not None:
+            level = self._mic_level.get()
+            if level is None:
+                self._refresh_mic_level()
+            elif level != self.mic_level_slider.GetValue():
+                self._show_mic_level(level)
+        event.Skip()
 
     def _on_device_setting_changed(self, event):
         self._remember_device_profile()
@@ -1114,4 +1191,7 @@ class AudioRecorderDialog(wx.Frame):
     def _on_close(self, event):
         if self.recorder.is_recording:
             self.recorder.stop()
+        if self._mic_level is not None:
+            self._mic_level.close()
+            self._mic_level = None
         self.Destroy()

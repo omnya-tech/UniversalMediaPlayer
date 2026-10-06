@@ -149,6 +149,7 @@ def _default_shortcuts_list(lang: str) -> list:
             "",
             "بدء / إيقاف التسجيل الصوتي المباشر: Ctrl + R",
             "إعلان مستوى الصوت أثناء التسجيل (داخل نافذة المسجّل): Ctrl + L",
+            "شريط «مستوى المايكروفون» في نافذة المسجّل: الأسهم درجة واحدة، وPage Up / Page Down عشر درجات، ويعمل أثناء التسجيل أيضًا",
             "فتح نافذة محول الصيغ: من قائمة أدوات (Tools Menu)",
             "فتح خيارات البرنامج والتفضيلات: Ctrl + Shift + P",
             "التنقل بين تبويبات نافذة الخيارات: Ctrl + Tab، أو Ctrl + 1 إلى Ctrl + 5",
@@ -234,6 +235,7 @@ def _default_shortcuts_list(lang: str) -> list:
             "Open Media Folder: Ctrl + Shift + O",
             "Export Shortcuts Guide as Text: Ctrl + Shift + H",
             "Announce recording level (inside the Recorder window): Ctrl + L",
+            "Microphone level slider in the Recorder window: arrows move one step, Page Up / Page Down ten steps; works while recording too",
             "Switch Options tabs: Ctrl + Tab, or Ctrl + 1 to Ctrl + 5",
             "Save a diagnostic report to the Desktop (no personal data): Ctrl + Shift + D",
             "Exit Application: Ctrl + Q",
@@ -324,6 +326,20 @@ def build_user_guide_html(tr, seek_kwargs: dict = None, shortcuts_kwargs: dict =
             "الحالي وأعلى قمة وصلت إليها.\n"
             "• <b>تنبيه تشوّه الصوت:</b> إذا كان مستوى المايكروفون مرتفعًا لدرجة تُفسد التسجيل، يخبرك البرنامج عند الحفظ "
             "ويرشدك إلى خفضه — بدل أن تكتشف الخشونة بعد فوات الأوان.\n"
+            "• <b>مستوى المايكروفون من داخل المسجّل:</b> شريط «مستوى المايكروفون» تحت اختيار الجهاز هو نفسه مستوى المايكروفون في "
+            "إعدادات الصوت في ويندوز، فلا تحتاج إلى فتحها. التشوّه يحدث داخل المايكروفون نفسه قبل أن يصل الصوت للبرنامج، "
+            "فخفض هذا المستوى هو العلاج الحقيقي. حرّكه بالأسهم درجة درجة، أو بـ <code>Page Up</code> و<code>Page Down</code> "
+            "عشر درجات، ويمكنك تغييره <b>أثناء التسجيل</b> ثم <code>Ctrl+L</code> لتسمع النتيجة. ابدأ من نحو 70%، واخفضه إن "
+            "سمعت التنبيه. إن كان الجهاز لا يسمح بالتحكم في مستواه يتعطل الشريط ويظهر تحته السبب.\n"
+            "• <b>تحسين صوت المايكروفون:</b> ثلاثة اختيارات: «بلا معالجة» يحفظ الصوت كما خرج من كرت الصوت؛ و«تنقية» تزيل "
+            "الطنين المنخفض (اهتزاز المكتب ومروحة الجهاز ولمس المايكروفون) وتمنع قص القمم دون أن تمس الكلام؛ و«تنقية وتقليل "
+            "الضوضاء الثابتة» تضيف خفض الوشيش والتكييف والمروحة وطنين الكهرباء. في هذا الإصدار صار تقليل الضوضاء يقيس ضوضاء "
+            "مايكروفونك وغرفتك بنفسه أثناء التسجيل، فيخفضها نحو أربع مرات في سكتات الكلام مع أي مايكروفون، دون أن يصير الصوت "
+            "معدنيًا.\n"
+            "• <b>الوضع الحصري (وصول مباشر لكرت الصوت):</b> البرنامج يأخذ الصوت من الكرت مباشرة دون مرور بمعالجة ويندوز، فلا "
+            "تحسينات خفية من النظام ولا خلط مع برامج أخرى، لكن لا يستعمل برنامج آخر المايكروفون أثناء التسجيل. بعض المايكروفونات "
+            "لا تقبله إلا بدقتها الأصلية (192000 مثلًا)؛ صار البرنامج يلتقط بها ويحوّل الصوت للدقة التي اخترتها، فيبقى الملف بحجمه "
+            "المعتاد. وإن رفض الكرت الوضع الحصري تمامًا يخبرك البرنامج ويسجّل بالوضع العادي.\n"
             "• <b>قائمة أجهزة نظيفة:</b> يجمع البرنامج المداخل التي تعود لجهاز واحد في سطر واحد باسم مفهوم، بدل أن يظهر "
             "المايكروفون الواحد أربع مرات، ويختار له أفضل طريقة اتصال بنفسه. ولكل جهاز إعداداته المحفوظة على حدة، فتصحيحك "
             "لمايكروفون لا يفسد إعدادات غيره.\n"
@@ -430,6 +446,22 @@ def build_user_guide_html(tr, seek_kwargs: dict = None, shortcuts_kwargs: dict =
             "• <b>Hear your level while recording:</b> press <code>Ctrl+L</code> at any time during a recording.\n"
             "• <b>Distortion warning:</b> if the microphone level is high enough to spoil the recording, you are told when "
             "saving.\n"
+            "• <b>Microphone level inside the recorder:</b> the “Microphone level” slider under the device choice is the same "
+            "microphone level as in Windows sound settings, so you don't need to open them. Distortion happens inside the "
+            "microphone before the sound reaches the program, so lowering this level is the real cure. Move it one step with "
+            "the arrows, or ten with <code>Page Up</code> and <code>Page Down</code>; you can change it <b>while recording</b> "
+            "and press <code>Ctrl+L</code> to hear the result. Start around 70% and lower it if you hear the warning. If a "
+            "device doesn't allow its level to be changed, the slider is disabled and the reason is shown under it.\n"
+            "• <b>Microphone enhancement:</b> three choices: “None” keeps the sound exactly as the sound card gives it; "
+            "“Clean up” removes low hum (desk bumps, computer fans, handling noise) and prevents clipped peaks without touching "
+            "speech; “Clean up and reduce steady noise” also lowers hiss, air conditioning, fans and electrical hum. In this "
+            "version the noise reduction measures your own microphone and room while recording, so it lowers the noise about "
+            "four times in the pauses with any microphone, without making the voice sound metallic.\n"
+            "• <b>Exclusive mode (direct access to the sound card):</b> the program takes the sound straight from the card, "
+            "skipping Windows processing, so there are no hidden system effects and no mixing with other programs — but no "
+            "other program can use the microphone while recording. Some microphones only accept it at their native rate "
+            "(192000, for example); the program now captures at that rate and converts to the one you chose, so the file "
+            "stays its usual size. If the card refuses exclusive mode entirely, you are told and recording uses the normal mode.\n"
             "• <b>Matches your hardware:</b> the recorder picks your microphone's native sample rate automatically."
         )
 

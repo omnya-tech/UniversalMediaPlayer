@@ -15,6 +15,7 @@ import numpy as np
 import sounddevice as sd
 
 from core.audio_devices import looks_like_system_audio, wasapi_exclusive_settings, wasapi_shared_settings
+from core.audio_filters import rate_converter
 from core.level_balance import TrackBalancer
 from core.logging_setup import configure_logging
 from core.voice_enhance import DEFAULT_ENHANCE_LEVEL, VoiceEnhancer
@@ -220,6 +221,10 @@ class AudioRecorder:
         self.enhance_level = "off"
         self.exclusive_requested = False
         self.used_exclusive = False
+        # معدل الجهاز الفعلي ومحوّله لمعدل الملف: بعض المايكات لا تقبل
+        # الحصري إلا بمعدلها الأصلي (شوف _input_attempts)
+        self._capture_rate = None
+        self._rate_converter = None
 
         self._direct_encode = False
         self._out_container = None
@@ -273,6 +278,7 @@ class AudioRecorder:
         بعدها بتفشل صامتة.
         """
         threshold = self._max_abs * _CLIP_RATIO
+        rate = self._capture_rate or self._sample_rate
         hot = (chunk >= threshold) | (chunk <= -threshold)
         if hot.ndim > 1:
             hot = hot.any(axis=1)
@@ -290,7 +296,7 @@ class AudioRecorder:
         # والأحداث القريبة من بعض بتندمج في حدث واحد.
         # السلسلة بتكمّل عبر حدود الكتل لأن _clip_run متخزّن في الكائن.
         # (اللفّة دي بتشتغل بس على الكتل اللي فيها تشبّع، فتكلفتها مهملة)
-        gap = max(1, int(self._sample_rate * _CLIP_EVENT_GAP_SEC))
+        gap = max(1, int(rate * _CLIP_EVENT_GAP_SEC))
         for index, is_hot in enumerate(hot):
             if not is_hot:
                 self._clip_run = 0
@@ -364,6 +370,8 @@ class AudioRecorder:
         self.exclusive_requested = bool(exclusive)
         self.used_exclusive = False
         self._enhancer = None
+        self._capture_rate = None
+        self._rate_converter = None
 
         self._stop_flag.clear()
         self._first_block.clear()
@@ -404,8 +412,26 @@ class AudioRecorder:
             msg = self._describe_open_failure(last_error)
             raise RecorderError(msg) from last_error
 
-        self._sample_rate = int(self._stream.samplerate)
+        self._capture_rate = int(self._stream.samplerate)
         self._channels = min(self._channels, self._stream.channels)
+        self._sample_rate = self._capture_rate
+        if self.used_exclusive and self._capture_rate != sample_rate:
+            # الحصري فُتح بمعدل الجهاز الأصلي: الملف يبقى بالمعدل المطلوب
+            try:
+                self._rate_converter = rate_converter(
+                    self._capture_rate, sample_rate, self._channels, self._dtype)
+                self._sample_rate = sample_rate
+                _logger.info("الوضع الحصري بمعدل الجهاز %d، والملف يتحوّل لـ%d",
+                             self._capture_rate, sample_rate)
+            except Exception:
+                # بلا تحويل الملف يُكتب بمعدل الجهاز: أكبر لكنه سليم
+                _logger.exception("تعذّر تجهيز تحويل المعدل، الملف بمعدل الجهاز")
+        if self._direct_encode:
+            # الجهاز قد يُفتح بقناة واحدة والمرمّز جُهّز لاثنتين: الإطار
+            # يتبع ما يصل فعلًا، والمرمّز يحوّل لما جُهّز له. بغير ذلك
+            # كتلة 441 عينة أحادية تُقرأ ستيريو فيتوقف التسجيل بخطأ
+            # "got 1764 bytes; need 1760 bytes"
+            self._av_layout = "mono" if self._channels == 1 else "stereo"
         self._reset_secondary_buffer(self._channels)
         if self._wave_file is not None:
             # الجهاز قد يُفتح بمعدل أو قنوات غير المطلوبة (المحاولات
@@ -642,7 +668,7 @@ class AudioRecorder:
         self._av_format = "s16" if self._bit_depth == 16 else "s32"  # 24 بت داخل s32
         self._av_layout = "mono" if self._channels == 1 else "stereo"
 
-    def _input_attempts(self, sample_rate, channels):
+    def _input_attempts(self, sample_rate, channels, native_rate=None):
         """
         الإعدادات اللي بنجرّبها بالترتيب، من الأقرب لطلب المستخدم للأبسط.
 
@@ -659,15 +685,18 @@ class AudioRecorder:
         seen = set()
         # الوضع الحصري أولًا لو طُلب: البرنامج يكلّم كرت الصوت مباشرة بلا
         # محرك ويندوز في الوسط، فلا خلط ولا تحويل معدل ولا «تحسينات»
-        # النظام. بالمعدل والقنوات المطلوبة بالضبط فقط؛ وإلا فالمشترك
+        # النظام. بالمعدل المطلوب، ثم بمعدل الجهاز الأصلي ويُحوَّل الصوت
+        # للمطلوب داخل البرنامج: مايك USB على جهاز التطوير لا يقبل الحصري
+        # إلا بـ192000، فكان يرجع للمشترك دائمًا. وإلا فالمشترك
         if self.exclusive_requested:
             exclusive = wasapi_exclusive_settings()
             if exclusive is not None:
-                for chans in (channels, 1):
-                    key = (sample_rate, chans, "exclusive")
-                    if key not in seen:
-                        seen.add(key)
-                        yield sample_rate, chans, exclusive
+                for rate in (sample_rate, native_rate):
+                    for chans in (channels, 1):
+                        key = (rate, chans, "exclusive")
+                        if rate and key not in seen:
+                            seen.add(key)
+                            yield rate, chans, exclusive
         for rate in (sample_rate, 48000, 44100, 16000):
             for chans in (channels, 1):
                 for extra in (None, shared):
@@ -709,7 +738,8 @@ class AudioRecorder:
                     return False
                 time.sleep(self._EXCLUSIVE_PROBE_SECONDS)
                 elapsed = time.perf_counter() - first[0]
-        except Exception:
+        except Exception as exc:
+            _logger.info("الوضع الحصري رفض %d هرتز/%d قناة: %s", int(rate), chans, exc)
             return False
         measured = frames[0] / elapsed if elapsed > 0 else 0
         ok = abs(measured - rate) <= rate * self._EXCLUSIVE_RATE_TOLERANCE
@@ -722,8 +752,12 @@ class AudioRecorder:
         """بيرجّع (نجح؟، آخر خطأ)."""
         last_error = None
         wanted = (sample_rate, channels)
+        try:
+            native_rate = int(sd.query_devices(device_index).get("default_samplerate") or 0)
+        except Exception:
+            native_rate = 0
 
-        for rate, chans, extra in self._input_attempts(sample_rate, channels):
+        for rate, chans, extra in self._input_attempts(sample_rate, channels, native_rate):
             if getattr(extra, "_exclusive", False) and not self._exclusive_rate_ok(
                     device_index, rate, chans, extra):
                 continue
@@ -751,8 +785,11 @@ class AudioRecorder:
                 continue
 
             self.used_exclusive = bool(getattr(extra, "_exclusive", False))
+            if self.exclusive_requested and not self.used_exclusive:
+                _logger.warning("كرت الصوت رفض الوضع الحصري بكل المعدلات، التسجيل بالمشترك")
 
-            if (rate, chans) != wanted:
+            # الحصري بمعدل الجهاز ليس تنازلًا: الصوت يتحوّل للمطلوب بعد الالتقاط
+            if (rate, chans) != wanted and not (self.used_exclusive and chans == channels):
                 _logger.warning(
                     "تعذّر فتح الجهاز بـ%d هرتز/%d قناة، اتفتح بـ%d/%d بدلها",
                     sample_rate, channels, rate, chans,
@@ -970,6 +1007,18 @@ class AudioRecorder:
             # التشبّع يُرصد على ما خرج من كرت الصوت قبل أي معالجة: المحدد
             # يمنع القص في الملف، لكن المايك المرتفع يستحق التنبيه
             self._track_clipping(chunk_pri)
+            if self._rate_converter is not None:
+                try:
+                    chunk_pri = self._rate_converter.push(chunk_pri)
+                except Exception as exc:
+                    # الملف ترويسته بالمعدل المطلوب، فلا يُكمل بمعدل الجهاز
+                    _logger.exception("تحويل معدل الالتقاط فشل أثناء التسجيل")
+                    if self.on_error:
+                        self.on_error(str(exc))
+                    self._stop_flag.set()
+                    return
+                if not len(chunk_pri):
+                    continue
             if self._enhancer is not None:
                 try:
                     chunk_pri = self._enhancer.process(chunk_pri, self._max_abs)
@@ -1003,14 +1052,19 @@ class AudioRecorder:
                 self._stop_flag.set()
                 return
 
-        # ما احتجزه تقليل الضوضاء في آخر التسجيل
-        if self._enhancer is not None:
-            try:
-                tail = self._enhancer.flush()
+        # ما احتجزه تحويل المعدل وتحسين الصوت في آخر التسجيل
+        try:
+            tails = []
+            if self._rate_converter is not None:
+                tails.append(self._rate_converter.flush())
+            if self._enhancer is not None:
+                tails = [self._enhancer.process(tail, self._max_abs) for tail in tails if len(tail)]
+                tails.append(self._enhancer.flush())
+            for tail in tails:
                 if tail is not None and len(tail):
                     self._write_chunk(tail)
-            except Exception:
-                _logger.exception("تعذّر تفريغ تحسين الصوت في آخر التسجيل")
+        except Exception:
+            _logger.exception("تعذّر تفريغ آخر التسجيل من التحويل أو التحسين")
 
     def _write_chunk(self, chunk):
         if self._direct_encode:
@@ -1061,10 +1115,10 @@ class AudioRecorder:
         # بلا أسماء ملفات ولا مسارات: السجل بيتبعت في التقرير التشخيصي.
         # (شوف core/diagnostics.py)
         _logger.info(
-            "REC_SUMMARY sr=%s ch=%s bits=%s fmt=%s dual=%s exclusive=%s enhance=%s "
+            "REC_SUMMARY sr=%s capture_sr=%s ch=%s bits=%s fmt=%s dual=%s exclusive=%s enhance=%s "
             "written=%.2fs wall=%.2fs clipped_samples=%d clip_events=%d "
             "input_overflows=%d sec_underruns=%d sec_overruns=%d",
-            self._sample_rate, self._channels, self._bit_depth,
+            self._sample_rate, self._capture_rate, self._channels, self._bit_depth,
             ".wav" if not self._direct_encode else "encoded",
             self._has_dual_input, self.used_exclusive,
             self.enhance_level if self._enhancer is not None else "off",
