@@ -204,3 +204,175 @@ def test_split_a_real_file_from_start_to_finish(make_editor, media_file):
             durations.append(float(container.duration) / av.time_base)
     assert durations[0] == pytest.approx(1.5, abs=0.15)
     assert sum(durations) == pytest.approx(4.0, abs=0.2)
+
+
+# ---------------------------------------------------------------- الاستماع من المحرر
+
+class FakePlayer:
+    """بديل _EditorPlayer: يسجّل ما يطلبه المحرر من المشغّل."""
+
+    def __init__(self, current=None, duration=60.0):
+        self.current = current
+        self.duration = duration
+        self.position = 0.0
+        self.loading = False
+        self.opened = []
+        self.toggles = 0
+
+    def current_path(self):
+        return self.current
+
+    def is_loading(self):
+        return self.loading
+
+    def open(self, path, seek_to=None):
+        self.opened.append((path, seek_to))
+
+    def toggle_play_pause(self):
+        self.toggles += 1
+
+    def seek_step(self, kind):
+        return {"normal": 10, "ctrl": 60}[kind]
+
+    def seek_relative(self, delta):
+        self.position = max(0.0, min(self.position + delta, self.duration))
+        return self.position
+
+    def seek_to(self, seconds):
+        if seconds > self.duration:
+            return None
+        self.position = seconds
+        return seconds
+
+
+def test_play_opens_the_page_file_then_toggles_it(make_editor, media_file):
+    from tests.gui_support import key_event
+    player = FakePlayer()
+    editor = make_editor(player=player)
+    editor.load_file(media_file)
+    editor.notebook.SetSelection(0)
+
+    editor._on_player_key(key_event(ord("P"), ctrl=True))
+    assert player.opened == [(media_file, None)]
+    assert player.toggles == 0          # الفتح يشغّل بنفسه
+    assert _said(editor) == editor.tr.t("editor_player_opening", name="talk.m4a")
+
+    player.current = media_file
+    editor._on_player_key(key_event(ord("P"), ctrl=True))
+    assert player.toggles == 1
+
+
+def test_alt_arrows_and_alt_page_keys_seek_and_say_the_position(make_editor, media_file):
+    from tests.gui_support import key_event
+    player = FakePlayer(current=media_file)
+    editor = make_editor(player=player)
+    editor.load_file(media_file)
+    editor.notebook.SetSelection(2)
+
+    editor._on_player_key(key_event(wx.WXK_RIGHT, alt=True))
+    assert player.position == 10
+    assert _said(editor) == "0:10"
+    editor._on_player_key(key_event(wx.WXK_PAGEDOWN, alt=True))
+    assert player.position == 60
+    editor._on_player_key(key_event(wx.WXK_LEFT, alt=True))
+    assert player.position == 50
+
+
+def test_unrelated_keys_pass_through(make_editor, media_file):
+    from tests.gui_support import key_event
+    player = FakePlayer(current=media_file)
+    editor = make_editor(player=player)
+    editor.load_file(media_file)
+    event = key_event(wx.WXK_RIGHT)
+    skipped = []
+    event.Skip = lambda skip=True: skipped.append(skip)
+    editor._on_player_key(event)
+    assert skipped and player.position == 0
+
+
+def test_player_needs_a_file_and_waits_while_loading(make_editor, media_file):
+    player = FakePlayer()
+    editor = make_editor(player=player)
+    editor.notebook.SetSelection(0)
+    editor.player_toggle()
+    assert _said(editor) == editor.tr.t("editor_err_choose_file")
+
+    editor.load_file(media_file)
+    player.loading = True
+    editor.player_seek(1)
+    assert player.opened == [] and _said(editor) == editor.tr.t("editor_player_loading")
+
+
+def test_list_pages_play_the_selected_file(make_editor, media_file, tmp_path):
+    from gui.media_editor_dialog import PAGE_MERGE
+    other = str(tmp_path / "second.m4a")
+    player = FakePlayer()
+    editor = make_editor(player=player)
+    editor.merge_list.add([media_file, other])
+    editor.notebook.SetSelection(PAGE_MERGE)
+    editor.merge_list.listbox.SetSelection(wx.NOT_FOUND)
+    editor.merge_list.listbox.SetSelection(1)
+    editor.player_toggle()
+    assert player.opened == [(other, None)]
+
+
+def test_ctrl_g_listens_from_the_time_in_the_focused_field(make_editor, media_file, monkeypatch):
+    player = FakePlayer(current=media_file)
+    editor = make_editor(player=player)
+    editor.load_file(media_file)
+    editor.notebook.SetSelection(0)
+    focused = [None]
+    monkeypatch.setattr(wx.Window, "FindFocus", staticmethod(lambda: focused[0]))
+
+    editor.player_goto_field()
+    assert _said(editor) == editor.tr.t("editor_player_goto_hint")
+
+    focused[0] = editor.split_time.text
+    editor.split_time.text.SetValue("0:42.5")
+    editor.player_goto_field()
+    assert player.position == pytest.approx(42.5)
+    assert _said(editor) == editor.tr.t("editor_player_from", time="0:42.5")
+
+    editor.split_time.text.SetValue("2:00")
+    editor.player_goto_field()
+    assert _said(editor) == editor.tr.t("editor_player_past_end", time="2:00")
+
+    # ملف لم يُفتح بعد: يُفتح والقفزة تنتظر حتى يجهز
+    player.current = None
+    editor.split_time.text.SetValue("0:05")
+    editor.player_goto_field()
+    assert player.opened == [(media_file, 5)]
+
+
+def test_no_player_row_without_a_player(make_editor):
+    editor = make_editor()
+    labels = [child.GetLabel() for child in editor.GetChildren()[0].GetChildren()]
+    assert editor.tr.t("editor_play_pause") not in labels
+
+
+def test_a_file_chosen_in_the_editor_starts_playing(make_editor, media_file, tmp_path, monkeypatch):
+    other = str(tmp_path / "second.m4a")
+    player = FakePlayer()
+    editor = make_editor(player=player)
+    monkeypatch.setattr(editor, "ask_open_files", lambda multiple: [media_file])
+    editor.split_file._on_choose(None)
+    assert player.opened == [(media_file, None)]
+
+    # الملف شغّال أصلًا: لا يُفتح من جديد
+    player.current = media_file
+    editor.segments_file._on_choose(None)
+    assert player.opened == [(media_file, None)]
+
+    # في القوائم يشتغل أول ملف جديد، لا المكرر
+    editor.merge_list.add([media_file])
+    monkeypatch.setattr(editor, "ask_open_files", lambda multiple: [media_file, other])
+    editor.merge_list._on_add(None)
+    assert player.opened[-1] == (other, None)
+
+
+def test_loading_the_players_file_does_not_reopen_it(make_editor, media_file):
+    player = FakePlayer(current=media_file)
+    editor = make_editor(player=player)
+    editor.load_file(media_file)
+    editor.ghost_add_to_list(0, media_file)
+    assert player.opened == []

@@ -111,6 +111,7 @@ class FileOpenMixin:
         self._pending_open_path = None
 
         if not ok:
+            self._keep_focus_on_open = False
             self._refresh_transport_buttons_state()
             return
 
@@ -166,8 +167,12 @@ class FileOpenMixin:
         if len(self.playlist) > 1:
             self._announce(self.tr.t("announce_playlist_position", index=self.playlist.current_position, total=len(self.playlist)), "announce_playlist_position")
 
-        # إلغاء التركيز عن العناصر ونقله للنافذة الرئيسية للتحكم باختصارات لوحة المفاتيح
-        self.SetFocus()
+        # إلغاء التركيز عن العناصر ونقله للنافذة الرئيسية للتحكم باختصارات لوحة المفاتيح.
+        # إلا لو المحرر هو اللي فتح الملف: SetFocus كان بينقل المستخدم من
+        # نافذة المحرر للمشغّل وهو شغّال فيها
+        if not getattr(self, "_keep_focus_on_open", False):
+            self.SetFocus()
+        self._keep_focus_on_open = False
 
         # البث المباشر مالوش موضع يتستكمل منه
         last_position = 0.0 if is_stream else self.settings.get_last_position(path)

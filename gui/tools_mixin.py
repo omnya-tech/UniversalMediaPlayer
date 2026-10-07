@@ -10,6 +10,7 @@
 import logging
 import os
 import sys
+import time
 
 import wx
 
@@ -57,6 +58,64 @@ def _write_path_list_if_needed(command, paths):
         # يكون أسوأ مما كان قبل هذا الإصلاح
         logger.exception("تعذّر كتابة قائمة الملفات المؤقتة")
         return None
+
+
+class _EditorPlayer:
+    """
+    تحكم المحرر في المشغّل: تشغيل ملف الصفحة وإيقافه والتقديم فيه.
+
+    من يعمل من نافذة المحرر يسمع الملف ويقدّم فيه دون أن ينتقل للمشغّل.
+    التشغيل نفسه في المشغّل (محرك واحد وموضع واحد)، فزر «الموضع الحالي»
+    والاختصارات الشبحية ترى ما يسمعه المستخدم.
+    """
+
+    def __init__(self, window):
+        self.window = window
+
+    def current_path(self):
+        from core.streams import is_stream_url
+
+        path = self.window._current_file_path
+        if not path or is_stream_url(path):
+            return None
+        return path
+
+    def is_loading(self):
+        return self.window._is_loading_file
+
+    def open(self, path, seek_to=None):
+        """يفتح الملف ويشغّله، والتركيز يبقى في المحرر."""
+        window = self.window
+        window._keep_focus_on_open = True
+        if seek_to is not None:
+            window._pending_seek_action = lambda: window._perform_seek(seek_to)
+        window._open_specific_path(path)
+
+    def toggle_play_pause(self):
+        self.window._on_play_pause(None)
+
+    def seek_step(self, kind):
+        return self.window.settings.get_seek_step(kind)
+
+    def seek_relative(self, delta):
+        """الموضع الجديد بالثواني؛ المحرر يعلنه بدقته."""
+        return self.window._seek_relative(delta, announce=False)
+
+    def seek_to(self, seconds):
+        """الموضع بعد القفز، أو None لو الوقت بعد نهاية الملف."""
+        window = self.window
+        duration = window.engine.duration
+        if duration and seconds > duration:
+            return None
+        from core.engine import PlaybackState
+
+        window._perform_seek(seconds)
+        # «تسمع من عنده»: الموقوف مؤقتًا يكمل من الوقت المطلوب
+        if window.engine.state == PlaybackState.PAUSED:
+            window.engine.play()
+        window._last_seek_time = time.time()
+        window._update_info_labels(is_seeking=True, seek_target=seconds)
+        return seconds
 
 
 class ToolsMixin:
@@ -250,6 +309,7 @@ class ToolsMixin:
             return path, self.engine.get_current_position()
 
         dialog = MediaEditorDialog(self.tr, initial_path=current, position_provider=position_provider,
+                                   player=_EditorPlayer(self),
                                    bookmarks_provider=self.settings.get_bookmark_entries,
                                    hotkeys_enabled=self.settings.get_enable_editor_hotkeys(),
                                    on_hotkeys_toggled=self.set_editor_hotkeys_enabled,

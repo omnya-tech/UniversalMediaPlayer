@@ -64,7 +64,7 @@ class SeekingMixin:
         self._perform_seek(target)
         self._announce_seek(target, seek_type="numpad")
 
-    def _seek_relative(self, delta_seconds):
+    def _seek_relative(self, delta_seconds, announce=True):
         # المدة تُقرأ مرة واحدة: قراءتها من المحرك أكثر من مرة قد تعطي
         # قيمًا مختلفة لو تغيّر الملف في الأثناء
         duration = self.engine.duration
@@ -76,5 +76,7 @@ class SeekingMixin:
         if duration > 0:
             self.seek_slider.SetValue(int(clamped))
         self._update_info_labels(is_seeking=True, seek_target=clamped)
-        seek_type = "seconds" if abs(delta_seconds) <= self.SEEK_NORMAL_SECONDS else "minutes"
-        self._announce_seek(clamped, seek_type=seek_type, jump_seconds=delta_seconds)
+        if announce:
+            seek_type = "seconds" if abs(delta_seconds) <= self.SEEK_NORMAL_SECONDS else "minutes"
+            self._announce_seek(clamped, seek_type=seek_type, jump_seconds=delta_seconds)
+        return clamped

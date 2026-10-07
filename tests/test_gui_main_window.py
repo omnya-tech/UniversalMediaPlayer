@@ -374,3 +374,40 @@ def test_every_shortcut_written_in_the_menus_is_understood(main_window):
             if "\t" in item.GetItemLabel() and item.GetAccel() is None:
                 unknown.append(item.GetItemLabel())
     assert unknown == []
+
+
+# ---------------------------------------------------------------- الاستماع من المحرر
+
+def test_editor_plays_and_seeks_in_the_player_and_keeps_its_focus(main_window, monkeypatch, tmp_path):
+    import gui.tools_mixin as tools_module
+    from tests.gui_support import FakeAnnouncer
+
+    monkeypatch.setattr(tools_module, "ScreenReaderAnnouncer", FakeAnnouncer)
+    path = str(tmp_path / "talk.mp3")
+    with open(path, "wb"):
+        pass
+    editor = main_window._ensure_media_editor(load_current=False)
+    try:
+        focus_calls = []
+        monkeypatch.setattr(main_window, "SetFocus", lambda: focus_calls.append(True))
+        editor.load_file(path)
+        editor.notebook.SetSelection(0)
+
+        editor.player_toggle()
+        for _ in range(20):
+            pump(0.05)
+            if main_window._current_file_path == path:
+                break
+        assert main_window.engine.opened == [path]
+        assert focus_calls == []                   # المحرر يبقى أمام المستخدم
+
+        main_window.engine.duration = 300.0
+        main_window.engine.position = 100.0
+        editor.player_seek(1)
+        assert main_window.engine.position == pytest.approx(100 + main_window.settings.get_seek_step("normal"))
+
+        editor.player_toggle()
+        assert main_window.engine.state == "paused"
+    finally:
+        editor.Destroy()
+        main_window._media_editor_dialog = None

@@ -12,6 +12,9 @@
 تختار بين السريع بنفس الجودة (من أقرب إطار مفتاحي) والدقيق بالثانية.
 
 ملفات القص تُحفظ بجانب الأصل، والدمج والمقاطع يُسأل المستخدم أين يحفظها.
+
+ومن يعمل من النافذة يسمع ملف الصفحة ويقدّم فيه منها (Ctrl+P وAlt مع
+الأسهم)، والتشغيل نفسه في المشغّل (انظر _EditorPlayer في tools_mixin).
 """
 
 import os
@@ -84,6 +87,7 @@ class _TimeField:
         self.text = wx.TextCtrl(parent, size=(120, -1))
         self.text.SetName(label)
         self.text.SetHint(dialog.tr.t("editor_time_hint"))
+        dialog._time_fields.append(self)
         self.position_button = wx.Button(parent, label=dialog.tr.t("editor_use_position"))
         self.position_button.SetName(f"{dialog.tr.t('editor_use_position')} - {label}")
         self.position_button.Bind(wx.EVT_BUTTON, self._on_position)
@@ -155,6 +159,7 @@ class _SingleFile:
         if paths:
             self.set_path(paths[0])
             self.dialog.announce(self.text.GetValue())
+            self.dialog.play_added(paths[0])
 
     def set_path(self, path):
         self.path = path
@@ -205,10 +210,13 @@ class _FileList:
         return added
 
     def _on_add(self, event):
-        added = self.add(self.dialog.ask_open_files(multiple=True))
+        paths = self.dialog.ask_open_files(multiple=True)
+        new = [path for path in paths if path not in self.paths]
+        added = self.add(paths)
         if added:
             self.dialog.announce(self.dialog.tr.t(
                 "editor_files_added", files=count_phrase(self.dialog.tr, "count_files", added)))
+            self.dialog.play_added(new[0])
 
     def _on_remove(self, event):
         selected = sorted(self.listbox.GetSelections(), reverse=True)
@@ -256,16 +264,22 @@ class MediaEditorDialog(wx.Frame):
     تغييرها في المشغّل (gui/editor_hotkeys.py). مع hide_on_close تُخفى
     النافذة عند إغلاقها بدل أن تُهدم، فما حدده المستخدم بالاختصارات وهو
     يسمع يبقى حتى يرجع إليه؛ والمشغّل يهدمها عند خروجه.
+
+    player: تحكم في المشغّل (_EditorPlayer في gui/tools_mixin.py) لتشغيل
+    ملف الصفحة والتقديم فيه من النافذة. بلاه لا يظهر صف التشغيل.
     """
 
     def __init__(self, tr, announcer=None, initial_path=None, position_provider=None,
-                 bookmarks_provider=None, hotkeys_enabled=None, on_hotkeys_toggled=None,
+                 player=None, bookmarks_provider=None, hotkeys_enabled=None,
+                 on_hotkeys_toggled=None,
                  hide_on_close=False, settings=None, on_open_settings=None):
         super().__init__(None, title=tr.t("editor_title"), size=(700, 640),
                          style=wx.DEFAULT_FRAME_STYLE)
         self.tr = tr
         self.announcer = announcer
         self.position_provider = position_provider
+        self.player = player
+        self._time_fields = []
         # دالة ترجع علامات ملف كقائمة (الثانية، الاسم)
         self.bookmarks_provider = bookmarks_provider
         self._segments = []
@@ -290,6 +304,9 @@ class MediaEditorDialog(wx.Frame):
 
         self._build_ui()
         bind_escape_closes(self)
+        if self.player is not None:
+            # بعد Escape: آخر ربط يُنفَّذ أولًا، ويمرر ما لا يخصه
+            self.Bind(wx.EVT_CHAR_HOOK, self._on_player_key)
         self.Bind(wx.EVT_CLOSE, self._on_close)
         if initial_path:
             self.load_file(initial_path)
@@ -322,6 +339,18 @@ class MediaEditorDialog(wx.Frame):
         self.notebook.AddPage(self._build_segments_page(), tr.t("editor_page_segments"))
         self.notebook.AddPage(self._build_merge_page(), tr.t("editor_page_merge"))
         outer.Add(self.notebook, proportion=1, flag=wx.EXPAND | wx.ALL, border=8)
+
+        if self.player is not None:
+            player_caption = wx.StaticText(panel, label=tr.t("editor_player_label"))
+            outer.Add(player_caption, flag=wx.LEFT | wx.RIGHT, border=12)
+            player_row = wx.BoxSizer(wx.HORIZONTAL)
+            for key, handler in (("editor_seek_back", lambda e: self.player_seek(-1)),
+                                 ("editor_play_pause", lambda e: self.player_toggle()),
+                                 ("editor_seek_forward", lambda e: self.player_seek(1))):
+                button = wx.Button(panel, label=tr.t(key))
+                button.Bind(wx.EVT_BUTTON, handler)
+                player_row.Add(button, flag=wx.RIGHT, border=8)
+            outer.Add(player_row, flag=wx.ALL, border=12)
 
         self.progress_label = wx.StaticText(panel, label=tr.t("editor_progress_idle"))
         outer.Add(self.progress_label, flag=wx.LEFT | wx.RIGHT, border=12)
@@ -527,6 +556,95 @@ class MediaEditorDialog(wx.Frame):
         self.segments_file.set_path(path)
         self.split_many_list.add([path])
         self.merge_list.add([path])
+
+    # ---- الاستماع إلى ملف الصفحة ----
+
+    def page_file(self):
+        """ملف الصفحة الحالية: الملف المختار، أو المحدد في القائمة."""
+        page = self.notebook.GetSelection()
+        if page == PAGE_SPLIT:
+            return self.split_file.path
+        if page == PAGE_SEGMENTS:
+            return self.segments_file.path
+        file_list = self.split_many_list if page == PAGE_SPLIT_MANY else self.merge_list
+        selected = file_list.listbox.GetSelections()
+        return file_list.paths[selected[0]] if selected else None
+
+    def _player_ready(self, seek_to=None):
+        """
+        هل ملف الصفحة هو ما في المشغّل؟ لو لا يفتحه ويشغّله ويرجع False.
+
+        seek_to يُنفَّذ بعد الفتح (Ctrl+G على ملف لم يُفتح بعد).
+        """
+        path = self.page_file()
+        if not path:
+            self.announce(self.tr.t("editor_err_choose_file"))
+            return False
+        if self.player.is_loading():
+            self.announce(self.tr.t("editor_player_loading"))
+            return False
+        if self._same_file(self.player.current_path(), path):
+            return True
+        self.player.open(path, seek_to=seek_to)
+        self.announce(self.tr.t("editor_player_opening", name=os.path.basename(path)))
+        return False
+
+    def play_added(self, path):
+        """
+        الملف الذي اختاره المستخدم في المحرر يشتغل فورًا ليسمعه ويحدد أوقاته.
+
+        للاختيار من النافذة فقط: ملف المشغّل الذي يضعه المحرر عند فتحه أو
+        تضيفه الاختصارات الشبحية شغّال أصلًا.
+        """
+        if self.player is None or self.player.is_loading():
+            return
+        if not self._same_file(self.player.current_path(), path):
+            self.player.open(path)
+
+    def player_toggle(self):
+        if self._player_ready():
+            self.player.toggle_play_pause()
+
+    def player_seek(self, direction, kind="normal"):
+        if not self._player_ready():
+            return
+        position = self.player.seek_relative(direction * self.player.seek_step(kind))
+        self.announce(self.tr.t("editor_player_at", time=format_time_precise(position)))
+
+    def player_goto_field(self):
+        """Ctrl+G في خانة وقت: يسمع من الوقت المكتوب فيها، ليتأكد من نقطة القص."""
+        focused = wx.Window.FindFocus()
+        field = next((f for f in self._time_fields if f.text is focused), None)
+        if field is None or not field.text.GetValue().strip():
+            self.announce(self.tr.t("editor_player_goto_hint"))
+            return
+        seconds = field.value()
+        if seconds is None:
+            return
+        time_text = format_time_precise(seconds)
+        if not self._player_ready(seek_to=seconds):
+            return
+        if self.player.seek_to(seconds) is None:
+            self.announce(self.tr.t("editor_player_past_end", time=time_text))
+            return
+        self.announce(self.tr.t("editor_player_from", time=time_text))
+
+    def _on_player_key(self, event):
+        key = event.GetKeyCode()
+        ctrl = event.ControlDown()
+        alt = event.AltDown()
+        shift = event.ShiftDown()
+        if ctrl and not (alt or shift) and key == ord("P"):
+            self.player_toggle()
+        elif ctrl and not (alt or shift) and key == ord("G"):
+            self.player_goto_field()
+        elif alt and not (ctrl or shift) and key in (wx.WXK_LEFT, wx.WXK_RIGHT):
+            self.player_seek(1 if key == wx.WXK_RIGHT else -1)
+        elif alt and not (ctrl or shift) and key in (wx.WXK_PAGEUP, wx.WXK_PAGEDOWN):
+            # بمقدار Ctrl مع السهم في المشغّل (دقيقة افتراضيًا)
+            self.player_seek(1 if key == wx.WXK_PAGEDOWN else -1, kind="ctrl")
+        else:
+            event.Skip()
 
     # ---- المقاطع ----
 
